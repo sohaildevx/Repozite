@@ -113,13 +113,13 @@ def _skip_reason():
 
 
 def _leftover_containers():
-    """Names of any repolens-agent containers that still exist."""
+    """Names of any repozite-agent containers that still exist."""
     exe = shutil.which("docker")
     if not exe:
         return None
     try:
         proc = subprocess.run(
-            [exe, "ps", "-a", "--filter", "name=repolens-agent",
+            [exe, "ps", "-a", "--filter", "name=repozite-agent",
              "--format", "{{.Names}}"],
             capture_output=True, text=True, timeout=10,
         )
@@ -138,7 +138,7 @@ class DockerSandboxIntegrationTests(SimpleTestCase):
 
     def _workspace_with(self, content):
         """Create a temp workspace containing one discovered test file."""
-        tmp = tempfile.mkdtemp(prefix="repolens-docker-it-")
+        tmp = tempfile.mkdtemp(prefix="repozite-docker-it-")
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         (Path(tmp) / "test_suite.py").write_text(content, encoding="utf-8")
         return Path(tmp)

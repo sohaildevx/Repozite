@@ -5,7 +5,7 @@ from django.db import models
 
 
 class Repository(models.Model):
-    """A GitHub repository that a user has registered with RepoLens."""
+    """A GitHub repository that a user has registered with Repozite."""
 
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,          # Django's built-in User

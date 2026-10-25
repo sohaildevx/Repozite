@@ -84,7 +84,7 @@ REST_FRAMEWORK = {
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'repolens-throttle',
+        'LOCATION': 'repozite-throttle',
     }
 }
 
@@ -96,6 +96,43 @@ ANALYZER_TIMEOUT_SECONDS = int(os.environ.get('ANALYZER_TIMEOUT', '45'))
 # X-Analyzer-Token header and the analyzer rejects anything else (401).
 # Both sides must read the SAME environment variable.
 ANALYZER_TOKEN = os.environ.get('ANALYZER_TOKEN', '')
+
+# ---------------------------------------------------------------------------
+# GitHub OAuth -- "Sign in with GitHub"
+# ---------------------------------------------------------------------------
+GITHUB_CLIENT_ID = os.environ.get('GITHUB_CLIENT_ID', '').strip()
+GITHUB_CLIENT_SECRET = os.environ.get('GITHUB_CLIENT_SECRET', '').strip()
+
+GITHUB_CALLBACK_URL = (
+    os.environ.get('GITHUB_CALLBACK_URL', '').strip()
+    or ('http://127.0.0.1:8000/api/auth/github/callback/' if DEBUG else '')
+)
+FRONTEND_URL = (
+    os.environ.get('FRONTEND_URL', '').strip()
+    or ('http://127.0.0.1:5173' if DEBUG else '')
+).rstrip('/')
+GITHUB_OAUTH_ENABLED = bool(
+    GITHUB_CLIENT_ID
+    and GITHUB_CLIENT_SECRET
+    and GITHUB_CALLBACK_URL
+    and FRONTEND_URL
+)
+
+# Mark the sessionid cookie (and the OAuth state/next/origin cookies, which
+# follow it) Secure. Off by default so local http://127.0.0.1 keeps working --
+# a Secure cookie is silently dropped over plain http, which would break
+# sign-in outright. Flip ON in production, where traffic is HTTPS.
+SESSION_COOKIE_SECURE = (
+    os.environ.get('SESSION_COOKIE_SECURE', 'False').lower() in ('true', '1', 'yes')
+)
+
+# Rate limit for the two unauthenticated OAuth routes: (attempts, window
+# seconds), keyed per client address. DRF's throttle classes cannot reach
+# these because they are plain Django views, not api_view handlers.
+GITHUB_OAUTH_THROTTLE = {
+    'authorize': (int(os.environ.get('GITHUB_OAUTH_RATE', '10')), 60),
+    'callback': (int(os.environ.get('GITHUB_OAUTH_CALLBACK_RATE', '30')), 60),
+}
 
 # NVIDIA Nemotron AI via Nebius Token Factory (OpenAI-compatible inference API).
 # Verified against the official docs quickstart (tokenfactory.nebius.com/docs):
@@ -177,7 +214,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 DATABASES = {
     'default': dj_database_url.parse(
-        os.environ.get('DATABASE_URL', 'postgresql://localhost:5432/repolens'),
+        os.environ.get('DATABASE_URL', 'postgresql://localhost:5432/repozite'),
         conn_max_age=600,
         conn_health_checks=True,
     )

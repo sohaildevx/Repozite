@@ -1,4 +1,4 @@
-"""Reproducible evaluation suite for RepoLens's Python bug-fixing agent (Phase 8).
+"""Reproducible evaluation suite for Repozite's Python bug-fixing agent (Phase 8).
 
 This module defines DETERMINISTIC, fixture-driven scenarios that exercise the
 full agent lifecycle (STEPS A-G) and record the outcomes that matter. It exists
@@ -415,7 +415,7 @@ def _run_regression(patched_source: str, check_code: str):
     untrusted-repo path and does not use the Docker sandbox. Returns
     (passed: bool, output: str).
     """
-    with tempfile.TemporaryDirectory(prefix="repolens-eval-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="repozite-eval-") as tmp:
         tmp_path = Path(tmp)
         (tmp_path / "candidate.py").write_text(patched_source, encoding="utf-8")
         # The check snippets reference the patched module as `candidate`.

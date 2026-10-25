@@ -12,4 +12,7 @@ urlpatterns = [
     path("logout/", views.logout_view, name="logout"),
     path("me/", views.me, name="me"),
     path("csrf/", views.csrf, name="csrf"),
+    
+    path("github/", views.github_login, name="github"),
+    path("github/callback/", views.github_callback, name="github-callback"),
 ]

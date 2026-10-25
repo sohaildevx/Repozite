@@ -154,7 +154,7 @@ def run_tests(workspace) -> SandboxResult | None:
         return None
 
     exe = shutil.which("docker")
-    name = f"repolens-agent-{uuid4().hex[:12]}"
+    name = f"repozite-agent-{uuid4().hex[:12]}"
     try:
         command = build_run_command(
             exe, name, workspace, image, settings.SANDBOX_USER

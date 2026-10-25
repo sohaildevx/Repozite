@@ -1,4 +1,4 @@
-"""Agent-run orchestration for RepoLens (Phase 7).
+"""Agent-run orchestration for Repozite (Phase 7).
 
 One entry point -- run_agent(issue) -- drives the full lifecycle:
 
@@ -274,7 +274,7 @@ def _fetch_snapshot(agent_run, issue):
     agent_run.start_commit_sha = snapshot.commit_sha
     agent_run.save(update_fields=["start_commit_sha", "updated_at"])
 
-    workspace = Path(tempfile.mkdtemp(prefix="repolens-agent-"))
+    workspace = Path(tempfile.mkdtemp(prefix="repozite-agent-"))
     for rel, content in snapshot.files.items():
         dest = workspace / rel
         dest.parent.mkdir(parents=True, exist_ok=True)

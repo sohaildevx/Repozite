@@ -134,7 +134,7 @@ def fetch_repository_metadata(owner, repo):
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}"
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": "RepoLens",
+        "User-Agent": "Repozite",
         "X-GitHub-Api-Version": "2022-11-28",
     }
 

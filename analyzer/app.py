@@ -1,4 +1,4 @@
-"""RepoLens analyzer: a minimal Flask service for static analysis.
+"""Repozite analyzer: a minimal Flask service for static analysis.
 
 POST /analyze
     Body: {"files": [{"path": "src/app.py", "content": "..."}, ...]}
@@ -174,7 +174,7 @@ def analyze_endpoint():
         # Sandbox: write files only into a tempdir we created, analyze,
         # delete. Nothing outside this directory is ever touched.
         try:
-            with tempfile.TemporaryDirectory(prefix="repolens-analyze-") as tmp:
+            with tempfile.TemporaryDirectory(prefix="repozite-analyze-") as tmp:
                 sandbox = Path(tmp)
                 for rel, content in py_files.items():
                     target = sandbox / rel

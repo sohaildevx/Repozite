@@ -43,13 +43,7 @@ SNAPSHOT_MAX_FILE_BYTES = 100_000      # 100 KB per file
 SNAPSHOT_MAX_TOTAL_BYTES = 1_000_000   # 1 MB total content
 SNAPSHOT_DEADLINE_SECONDS = 90.0       # wall-clock budget for the whole fetch
 
-# Blob cache bounds. Git blobs are content-addressed by their SHA, so a given
-# SHA always decodes to the same bytes -- this makes the cache safe to reuse
-# across runs: no staleness (content can never change for a fixed SHA) and no
-# authorization bypass (we only ever cache blobs we already fetched through the
-# authenticated path for a repository the caller owns). It exists to stop the
-# N+1 blob re-download that otherwise re-fetches every file on each agent run
-# for the same commit, which is what exhausts the unauthenticated GitHub quota.
+
 BLOB_CACHE_MAX_ENTRIES = 512
 BLOB_CACHE_MAX_BYTES = 20_000_000      # 20 MB of decoded content, hard cap
 
@@ -271,7 +265,7 @@ def fetch_github_snapshot(repository) -> Snapshot:
     session = requests.Session()
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": "RepoLens",
+        "User-Agent": "Repozite",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     # Optional token raises the rate limit (same env var as Phase 4).
