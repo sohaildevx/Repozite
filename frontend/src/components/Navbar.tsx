@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Code, LogOut } from 'lucide-react'
+import { LogOut } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -48,10 +48,22 @@ export function Navbar() {
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
         <Link
           to="/"
-          className="flex items-center gap-2.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          className="flex items-center gap-2 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           aria-label="Repozite — home"
         >
-          <Code className="size-[18px] text-primary" aria-hidden="true" />
+          {/* logo.svg is a VTracer trace of a raster mark: it carries its own
+              opaque cream (#FDF9F1) square, which would read as a bright block
+              against the dark navbar. Rounded into an app-tile so the light
+              background reads as intentional, and so the artwork (which only
+              fills ~half the canvas) sits close to the wordmark. */}
+          <img
+            src="/logo.svg"
+            alt=""
+            width={32}
+            height={32}
+            aria-hidden="true"
+            className="size-8 shrink-0 rounded-md"
+          />
           <span className="text-[15px] font-semibold tracking-tight">
             Repo<span className="text-primary">zite</span>
           </span>
