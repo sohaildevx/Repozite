@@ -1,7 +1,7 @@
 import { Code } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 
-const REPO_URL = 'https://github.com/sohaildevx/Repolens'
+const REPO_URL = 'https://github.com/sohaildevx/Repozite'
 
 export function Footer() {
   return (
@@ -12,7 +12,7 @@ export function Footer() {
             <div className="flex items-center gap-2.5">
               <Code className="size-4 text-primary" aria-hidden="true" />
               <span className="text-sm font-semibold tracking-tight">
-                Repo<span className="text-primary">Lens</span>
+                Repo<span className="text-primary">zite</span>
               </span>
             </div>
             <p className="mt-3 text-[13px] leading-relaxed text-muted-foreground">
@@ -43,7 +43,7 @@ export function Footer() {
         <Separator className="my-8 bg-border" />
 
         <p className="font-mono text-[11px] tracking-wide text-muted-foreground/70 uppercase">
-          © 2026 RepoLens — built for Python repositories
+          © 2026 Repozite — built for Python repositories
         </p>
       </div>
     </footer>

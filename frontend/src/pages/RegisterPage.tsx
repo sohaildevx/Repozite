@@ -129,7 +129,7 @@ export function RegisterPage() {
           Your account is ready.
         </h1>
         <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
-          Sign in to continue {next !== '/' ? 'back to your issue' : 'to RepoLens'}.
+          Sign in to continue {next !== '/' ? 'back to your issue' : 'to Repozite'}.
         </p>
         <Button size="sm" className="mt-6" asChild>
           <Link to={loginPathFor(next)}>Sign in</Link>
@@ -146,7 +146,7 @@ export function RegisterPage() {
         Account <span className="text-primary/60">/ register</span>
       </p>
       <h1 className="mt-4 text-[clamp(1.75rem,5vw,2.5rem)] leading-[1.05] font-bold tracking-tight">
-        Create your RepoLens account.
+        Create your Repozite account.
       </h1>
       <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
         Turn detected issues into proposed fixes, with validation results you

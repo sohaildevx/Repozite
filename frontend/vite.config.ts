@@ -17,11 +17,8 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
   },
   server: {
-    // Dev-only proxy: the browser talks to same-origin /api/... and Vite
-    // forwards to the Django backend. This keeps session + CSRF cookies
-    // same-origin in development, so no CORS changes are needed server-side.
-    // Production should serve the built frontend and the API from one origin
-    // (reverse proxy), which is the same contract.
+    
+    host: true,
     proxy: {
       '/api': {
         target: process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8000',

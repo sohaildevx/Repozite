@@ -7,10 +7,21 @@ import { registerPathFor, safeNextPath } from '@/lib/next'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
+import { GithubIcon } from '@/components/GithubIcon'
 import {
   AuthFieldLabel,
   PasswordField,
 } from '@/components/PasswordField'
+
+
+const GITHUB_NOTICES: Record<string, string> = {
+  unconfigured:
+    'Sign in with GitHub is not configured for this deployment yet.',
+  denied: 'You cancelled the GitHub sign-in.',
+  failed: 'GitHub sign-in could not be completed.',
+  mismatch: 'That GitHub sign-in could not be verified.',
+  throttled: 'Too many sign-in attempts -- please wait a minute and try again.',
+}
 
 /**
  * Sign-in page. The backend opens a Django session cookie (CSRF-aware,
@@ -22,6 +33,7 @@ import {
 export function LoginPage() {
   const [searchParams] = useSearchParams()
   const next = safeNextPath(searchParams.get('next'))
+  const githubNotice = GITHUB_NOTICES[searchParams.get('github') ?? ''] ?? null
   const navigate = useNavigate()
   const { user, loading: authLoading, refresh } = useAuth()
 
@@ -96,6 +108,41 @@ export function LoginPage() {
         Sign in to generate AI-powered fixes and validate them in an isolated
         environment.
       </p>
+
+      {githubNotice && (
+        <div
+          role="status"
+          className="mt-5 rounded-sm border border-border bg-card px-4 py-3"
+        >
+          <p className="font-mono text-[12px] text-muted-foreground">
+            {githubNotice}
+          </p>
+        </div>
+      )}
+
+      {githubNotice !== 'unconfigured' && (
+        <>
+          <Button
+            variant="outline"
+            size="lg"
+            className="mt-8 h-11 w-full rounded-sm text-[13px]"
+            asChild
+          >
+            <a href={`/api/auth/github/?next=${encodeURIComponent(next)}`}>
+              <GithubIcon className="size-4" aria-hidden="true" />
+              Sign in with GitHub
+            </a>
+          </Button>
+
+          <div className="my-6 flex items-center gap-3" aria-hidden="true">
+            <span className="h-px flex-1 bg-border" />
+            <span className="font-mono text-[11px] tracking-[0.22em] text-muted-foreground uppercase">
+              or
+            </span>
+            <span className="h-px flex-1 bg-border" />
+          </div>
+        </>
+      )}
 
       <form onSubmit={handleSubmit} noValidate className="mt-10 space-y-5">
         <div>

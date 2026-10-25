@@ -9,8 +9,8 @@ import {
 
 describe('parseGithubRepoUrl', () => {
   it('accepts a canonical URL and returns it unchanged', () => {
-    expect(parseGithubRepoUrl('https://github.com/sohaildevx/Repolens')).toBe(
-      'https://github.com/sohaildevx/Repolens',
+    expect(parseGithubRepoUrl('https://github.com/sohaildevx/Repozite')).toBe(
+      'https://github.com/sohaildevx/Repozite',
     )
   })
 
@@ -54,9 +54,9 @@ describe('parseGithubRepoUrl', () => {
   })
 
   it('splits owner and repo for metadata lookups', () => {
-    expect(repoParts('https://github.com/sohaildevx/Repolens')).toEqual({
+    expect(repoParts('https://github.com/sohaildevx/Repozite')).toEqual({
       owner: 'sohaildevx',
-      repo: 'Repolens',
+      repo: 'Repozite',
     })
   })
 })

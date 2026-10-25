@@ -4,10 +4,16 @@ import { Link, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Spinner } from '@/components/ui/spinner'
+import { GithubIcon } from '@/components/GithubIcon'
 import { useAuth } from '@/lib/auth'
-import { loginPathFor } from '@/lib/next'
+import { loginPathFor, safeNextPath } from '@/lib/next'
 
-const REPO_URL = 'https://github.com/sohaildevx/Repolens'
+const REPO_URL = 'https://github.com/sohaildevx/Repozite'
+
+
+function githubSignInPath(next: string): string {
+  return `/api/auth/github/?next=${encodeURIComponent(safeNextPath(next))}`
+}
 
 function focusRepositoryInput() {
   const input = document.getElementById('repository-input')
@@ -43,11 +49,11 @@ export function Navbar() {
         <Link
           to="/"
           className="flex items-center gap-2.5 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          aria-label="RepoLens — home"
+          aria-label="Repozite — home"
         >
           <Code className="size-[18px] text-primary" aria-hidden="true" />
           <span className="text-[15px] font-semibold tracking-tight">
-            Repo<span className="text-primary">Lens</span>
+            Repo<span className="text-primary">zite</span>
           </span>
         </Link>
 
@@ -111,23 +117,32 @@ export function Navbar() {
             </span>
           )}
 
-          {onLanding ? (
-            <Button
-              size="sm"
-              className="ml-1 h-8 rounded-sm px-3.5 text-[13px]"
-              onClick={focusRepositoryInput}
-            >
-              Get started
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              className="ml-1 h-8 rounded-sm px-3.5 text-[13px]"
-              asChild
-            >
-              <Link to="/">Get started</Link>
+          {!loading && !user && (
+            <Button size="sm" className="ml-1 h-8 rounded-sm px-3 text-[13px]" asChild>
+              <a href={githubSignInPath(location.pathname + location.search)}>
+                <GithubIcon className="size-3.5" aria-hidden="true" />
+                Sign in with GitHub
+              </a>
             </Button>
           )}
+          {!loading && user &&
+            (onLanding ? (
+              <Button
+                size="sm"
+                className="ml-1 h-8 rounded-sm px-3.5 text-[13px]"
+                onClick={focusRepositoryInput}
+              >
+                Get started
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                className="ml-1 h-8 rounded-sm px-3.5 text-[13px]"
+                asChild
+              >
+                <Link to="/">Get started</Link>
+              </Button>
+            ))}
         </nav>
       </div>
     </header>

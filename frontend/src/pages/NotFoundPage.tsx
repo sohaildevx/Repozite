@@ -10,7 +10,7 @@ export function NotFoundPage() {
         This page does not exist.
       </h1>
       <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
-        Every link in RepoLens maps to a real route -- scans, findings and
+        Every link in Repozite maps to a real route -- scans, findings and
         issues all live under <code className="font-mono">/scan/…</code>.
       </p>
       <Link

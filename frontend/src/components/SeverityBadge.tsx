@@ -9,10 +9,7 @@ const STYLES: Record<Severity, string> = {
   info: 'border-border text-muted-foreground/80',
 }
 
-/**
- * Severity chip. Colors stay inside the RepoLens palette: red family for
- * serious findings, copper for medium, muted gray for low/info.
- */
+
 export function SeverityBadge({
   severity,
   className,

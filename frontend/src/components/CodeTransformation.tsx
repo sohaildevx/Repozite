@@ -46,7 +46,7 @@ export function CodeTransformation() {
             a concrete defect static analysis genuinely catches.
           </p>
           <p className="mt-4 max-w-md text-sm leading-relaxed text-muted-foreground/80">
-            RepoLens targets issues like this one. It does not claim to
+            Repozite targets issues like this one. It does not claim to
             detect every bug, and it shows validation results as they are —
             including when a fix cannot be verified.
           </p>
