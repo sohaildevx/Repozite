@@ -53,3 +53,37 @@ describe('loginPathFor / registerPathFor', () => {
     expect(registerPathFor('//evil.example')).toBe('/register?next=%2F')
   })
 })
+
+describe('auth routes as destinations', () => {
+  it('never treat an auth page as a next destination', () => {
+    expect(safeNextPath('/login')).toBe('/')
+    expect(safeNextPath('/register')).toBe('/')
+    expect(safeNextPath('/login?next=%2Fscan%2F3')).toBe('/')
+    expect(safeNextPath('/register?github=failed')).toBe('/')
+  })
+})
+
+describe('returnToFor', () => {
+  it('uses the current location on ordinary pages', () => {
+    expect(returnToFor('/')).toBe('/')
+    expect(returnToFor('/scan/3')).toBe('/scan/3')
+    expect(returnToFor('/scan/3', '?tab=findings')).toBe('/scan/3?tab=findings')
+  })
+
+  it('keeps the destination an auth page was already pointed at', () => {
+    expect(returnToFor('/login', '?next=%2Fscan%2F3')).toBe('/scan/3')
+    expect(returnToFor('/register', '?next=%2Fscan%2F3')).toBe('/scan/3')
+  })
+
+  it('never carries the auth page itself forward', () => {
+    // Regression guard: the navbar built `next` from
+    // location.pathname + location.search, so on /login?github=...&next=/ it
+    // encoded the login URL as its own destination. The OAuth round trip then
+    // bounced back to a visually identical page and read as a pointless
+    // refresh -- "click, nothing happens".
+    expect(returnToFor('/login')).toBe('/')
+    expect(returnToFor('/login', '?github=unconfigured&next=%2F')).toBe('/')
+    expect(returnToFor('/register', '?github=failed')).toBe('/')
+    expect(returnToFor('/login', '?next=%2Flogin%3Fnext%3D%252F')).toBe('/')
+  })
+})
