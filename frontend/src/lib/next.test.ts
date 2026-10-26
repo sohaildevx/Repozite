@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { loginPathFor, registerPathFor, safeNextPath } from '@/lib/next'
+import { loginPathFor, registerPathFor, returnToFor, safeNextPath } from '@/lib/next'
 
 describe('safeNextPath', () => {
   it('keeps same-origin paths, including query and fragment', () => {

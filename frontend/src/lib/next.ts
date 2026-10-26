@@ -10,6 +10,9 @@ function hasUnsafeCharCode(value: string): boolean {
   return false
 }
 
+
+const AUTH_PATHS = new Set(['/login', '/register'])
+
 export function safeNextPath(raw: string | null | undefined): string {
   if (!raw) {
     return '/'
@@ -24,7 +27,16 @@ export function safeNextPath(raw: string | null | undefined): string {
   ) {
     return '/'
   }
-  return value
+  // Compare on the path only: /login?next=... is still /login.
+  return AUTH_PATHS.has(value.split('?')[0]) ? '/' : value
+}
+
+
+export function returnToFor(pathname: string, search = ''): string {
+  if (AUTH_PATHS.has(pathname)) {
+    return safeNextPath(new URLSearchParams(search).get('next'))
+  }
+  return safeNextPath(pathname + search)
 }
 
 /** Build the login URL for a given return destination. */

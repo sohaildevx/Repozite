@@ -6,7 +6,7 @@ import { Separator } from '@/components/ui/separator'
 import { Spinner } from '@/components/ui/spinner'
 import { GithubIcon } from '@/components/GithubIcon'
 import { useAuth } from '@/lib/auth'
-import { loginPathFor, safeNextPath } from '@/lib/next'
+import { loginPathFor, returnToFor, safeNextPath } from '@/lib/next'
 
 const REPO_URL = 'https://github.com/sohaildevx/Repozite'
 
@@ -99,7 +99,7 @@ export function Navbar() {
           )}
           {!loading && !user && (
             <Link
-              to={loginPathFor(location.pathname + location.search)}
+              to={loginPathFor(returnToFor(location.pathname, location.search))}
               className="rounded-sm px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
               Sign in
@@ -131,7 +131,7 @@ export function Navbar() {
 
           {!loading && !user && (
             <Button size="sm" className="ml-1 h-8 rounded-sm px-3 text-[13px]" asChild>
-              <a href={githubSignInPath(location.pathname + location.search)}>
+              <a href={githubSignInPath(returnToFor(location.pathname, location.search))}>
                 <GithubIcon className="size-3.5" aria-hidden="true" />
                 Sign in with GitHub
               </a>
