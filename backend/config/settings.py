@@ -34,6 +34,15 @@ DEBUG = os.environ.get('DEBUG', 'True').lower() in ('true', '1', 'yes')
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 
+USE_X_FORWARDED_HOST = True
+
+# Paired with USE_X_FORWARDED_HOST: the proxy forwards the scheme the browser
+# used, so request.is_secure() reports true behind it. Without this Django
+# compares CSRF Origin/Referer headers as "http://host" against the browser's
+# "https://host" and rejects every POST with a 403.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+
 # Application definition
 
 INSTALLED_APPS = [
