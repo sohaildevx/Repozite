@@ -23,16 +23,6 @@ function githubSignInPath(next: string): string {
   return `/api/auth/github/?next=${encodeURIComponent(safeNextPath(next))}`
 }
 
-function focusRepositoryInput() {
-  const input = document.getElementById('repository-input')
-  if (input instanceof HTMLElement) {
-    input.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    if (input instanceof HTMLInputElement) {
-      input.focus({ preventScroll: true })
-    }
-  }
-}
-
 export function Navbar() {
   const { user, loading, signOut } = useAuth()
   const location = useLocation()
@@ -176,24 +166,6 @@ export function Navbar() {
               </a>
             </Button>
           )}
-          {!loading && user &&
-            (onLanding ? (
-              <Button
-                size="sm"
-                className="ml-1 h-8 rounded-sm px-3.5 text-[13px]"
-                onClick={focusRepositoryInput}
-              >
-                Get started
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                className="ml-1 h-8 rounded-sm px-3.5 text-[13px]"
-                asChild
-              >
-                <Link to="/">Get started</Link>
-              </Button>
-            ))}
         </nav>
       </div>
     </header>
