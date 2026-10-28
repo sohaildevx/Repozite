@@ -29,6 +29,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import TestCase, override_settings
+from rest_framework.test import APIClient
 
 from . import views
 
@@ -347,8 +348,6 @@ class GithubCallbackSuccessTests(TestCase):
 
     @override_settings(**configured())
     def test_me_endpoint_confirms_the_session(self):
-        from rest_framework.test import APIClient  # local: avoids import cycle noise
-
         start_flow(self.client)
         state = self.client.cookies[views.OAUTH_STATE_COOKIE].value
         post, get = mock_github()
@@ -433,6 +432,68 @@ class GithubCallbackLinkingTests(TestCase):
             self.assertTrue(any("/user/emails" in str(c) for c in get_mock.call_args_list))
 
         self.assertEqual(User.objects.get().email, "main@example.com")
+
+
+class GithubAvatarTests(TestCase):
+    """The avatar is session state, not account state.
+
+    It is set only by the OAuth leg and wiped whenever logout() flushes the
+    session, so a password account can never inherit somebody else's picture.
+    """
+
+    def _signed_in_with_avatar(self):
+        """Drive the real flow: authorize -> callback -> session holds one."""
+        start_flow(self.client)
+        state = self.client.cookies[views.OAUTH_STATE_COOKIE].value
+        post, get = mock_github(
+            profile=github_user(avatar_url="https://avatars.githubusercontent.com/u/42")
+        )
+        with post, get:
+            self.client.get(CALLBACK_URL, {"code": "abc", "state": state})
+
+    @override_settings(**configured())
+    def test_avatar_reaches_the_session_and_the_me_endpoint(self):
+        self._signed_in_with_avatar()
+
+        self.assertEqual(
+            self.client.session["avatar_url"],
+            "https://avatars.githubusercontent.com/u/42",
+        )
+
+        api = APIClient()
+        api.cookies = self.client.cookies
+        me = api.get("/api/auth/me/")
+        self.assertEqual(me.status_code, 200)
+        self.assertEqual(
+            me.data["avatar_url"], "https://avatars.githubusercontent.com/u/42"
+        )
+
+    @override_settings(**configured())
+    def test_a_profile_without_an_avatar_degrades_to_empty(self):
+        """github_user() carries no avatar_url -- sign-in must still succeed."""
+        start_flow(self.client)
+        state = self.client.cookies[views.OAUTH_STATE_COOKIE].value
+        post, get = mock_github()
+
+        with post, get:
+            response = self.client.get(CALLBACK_URL, {"code": "abc", "state": state})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn("avatar_url", self.client.session)
+
+        api = APIClient()
+        api.cookies = self.client.cookies
+        self.assertEqual(api.get("/api/auth/me/").data["avatar_url"], "")
+
+    @override_settings(**configured())
+    def test_sign_out_clears_the_avatar(self):
+        self._signed_in_with_avatar()
+
+        api = APIClient()
+        api.cookies = self.client.cookies
+        self.assertEqual(api.post("/api/auth/logout/").status_code, 200)
+
+        self.assertNotIn("avatar_url", self.client.session)
 
 
 class GithubThrottleTests(TestCase):

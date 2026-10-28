@@ -309,14 +309,15 @@ export function getIssue(issueId: number): Promise<Issue> {
 }
 
 /** Current user, or null when anonymous (403 is the documented answer). */
-export async function getCurrentUser(): Promise<{
+export interface CurrentUser {
   id: number
   username: string
-} | null> {
+  avatar_url?: string
+}
+
+export async function getCurrentUser(): Promise<CurrentUser | null> {
   try {
-    return await apiFetch<{ id: number; username: string }>(
-      '/api/auth/me/',
-    )
+    return await apiFetch<CurrentUser>('/api/auth/me/')
   } catch (err) {
     if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
       return null

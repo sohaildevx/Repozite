@@ -2,6 +2,14 @@ import { useState } from 'react'
 import { LogOut } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Separator } from '@/components/ui/separator'
 import { Spinner } from '@/components/ui/spinner'
 import { GithubIcon } from '@/components/GithubIcon'
@@ -30,6 +38,11 @@ export function Navbar() {
   const location = useLocation()
   const onLanding = location.pathname === '/'
   const [signingOut, setSigningOut] = useState(false)
+ 
+  const [failedAvatar, setFailedAvatar] = useState<string | null>(null)
+  const avatarSrc =
+    user?.avatar_url && failedAvatar !== user.avatar_url ? user.avatar_url : null
+  const initials = user ? user.username.slice(0, 2).toUpperCase() : ''
 
   async function handleSignOut() {
     if (signingOut) {
@@ -106,27 +119,53 @@ export function Navbar() {
             </Link>
           )}
           {!loading && user && (
-            <span className="hidden items-center gap-2 sm:flex">
-              <span
-                className="max-w-[10rem] truncate px-2 py-1.5 font-mono text-[12px] text-muted-foreground"
-                title={`Signed in as ${user.username}`}
-              >
-                {user.username}
-              </span>
-              <button
-                type="button"
-                onClick={() => void handleSignOut()}
-                disabled={signingOut}
-                aria-label={signingOut ? 'Signing out' : 'Sign out'}
-                className="rounded-sm p-1.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
-              >
-                {signingOut ? (
-                  <Spinner className="size-3.5" aria-label="Signing out" />
-                ) : (
-                  <LogOut className="size-3.5" aria-hidden="true" />
-                )}
-              </button>
-            </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={`Account menu for ${user.username}`}
+                  title={user.username}
+                  className="ml-1 flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent text-[12px] font-semibold text-accent-foreground outline-none ring-offset-background transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {avatarSrc ? (
+                    <img
+                      src={avatarSrc}
+                      alt=""
+                      aria-hidden="true"
+                      onError={() => setFailedAvatar(user.avatar_url ?? '')}
+                      className="size-full object-cover"
+                    />
+                  ) : (
+                    <span aria-hidden="true">{initials}</span>
+                  )}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[13rem]">
+                <DropdownMenuLabel
+                  className="truncate font-mono text-[12px]"
+                  title={user.username}
+                >
+                  {user.username}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={signingOut}
+                 
+                  onSelect={(event) => {
+                    event.preventDefault()
+                    void handleSignOut()
+                  }}
+                  className="text-muted-foreground focus:text-foreground"
+                >
+                  {signingOut ? (
+                    <Spinner className="size-4" aria-label="Signing out" />
+                  ) : (
+                    <LogOut aria-hidden="true" />
+                  )}
+                  {signingOut ? 'Signing out…' : 'Sign out'}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
 
           {!loading && !user && (

@@ -307,6 +307,13 @@ def github_callback(request):
 
     login(request, user, backend=OAUTH_SESSION_BACKEND)
 
+
+    avatar_url = profile.get("avatar_url", "")
+    if avatar_url:
+        request.session["avatar_url"] = avatar_url
+    else:
+        request.session.pop("avatar_url", None)
+
     response = _frontend_redirect(next_path, origin)
     _clear_oauth_cookies(response)
     return response
@@ -390,7 +397,12 @@ def _fetch_profile(token):
             if chosen:
                 email = chosen.get("email") or ""
 
-    return {"login": login_name, "email": email}
+    return {
+        "login": login_name,
+        "email": email,
+        
+        "avatar_url": str(profile.get("avatar_url") or ""),
+    }
 
 
 def _resolve_user(profile):
@@ -468,8 +480,15 @@ def logout_view(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def me(request):
-    """GET /api/auth/me/ -- current user (200 / 403)."""
-    return Response(UserSerializer(request.user).data)
+    """GET /api/auth/me/ -- current user (200 / 403).
+
+    `avatar_url` is deliberately not a UserSerializer field: it is session
+    state, not account state, so only this endpoint (which has the request)
+    can read it. Register/login responses therefore stay byte-identical.
+    """
+    payload = UserSerializer(request.user).data
+    payload["avatar_url"] = request.session.get("avatar_url", "")
+    return Response(payload)
 
 
 @ensure_csrf_cookie

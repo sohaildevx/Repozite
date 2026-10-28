@@ -7,10 +7,10 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { getCurrentUser, logout } from '@/lib/api'
+import { getCurrentUser, logout, type CurrentUser } from '@/lib/api'
 
 interface AuthState {
-  user: { id: number; username: string } | null
+  user: CurrentUser | null
   loading: boolean
   refresh: () => Promise<void>
   signOut: () => Promise<void>
