@@ -1,0 +1,72 @@
+
+
+rules:
+  - id: repozite.js-eval
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      eval() executes a string as code at runtime; attacker-controlled input
+      here becomes arbitrary code execution (injection vector).
+    pattern: eval(...)
+
+  - id: repozite.js-function-constructor
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      new Function() compiles its argument to code at runtime; the same
+      injection vector as eval().
+    pattern: new Function(...)
+
+  - id: repozite.js-string-timer
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      setTimeout()/setInterval() with a string argument evaluates that
+      string as code; pass a function instead.
+    pattern-either:
+      - pattern: setTimeout("...", ...)
+      - pattern: setInterval("...", ...)
+      - pattern: setTimeout(`...`, ...)
+      - pattern: setInterval(`...`, ...)
+
+  - id: repozite.js-innerhtml-assignment
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Assigning to innerHTML inserts raw HTML; combining this with
+      untrusted data enables cross-site scripting (XSS).
+    pattern-either:
+      - pattern: $EL.innerHTML = $VALUE
+      - pattern: $EL.innerHTML += $VALUE
+
+  - id: repozite.js-document-write
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      document.write() with dynamic content enables cross-site scripting
+      (XSS); prefer DOM APIs that do not parse HTML strings.
+    pattern-either:
+      - pattern: document.write(...)
+      - pattern: document.writeln(...)
+
+  - id: repozite.js-child-process-exec
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      exec()/execSync() runs a shell command; a command assembled from
+      dynamic values enables shell injection. Prefer execFile() with a
+      fixed executable and argument array.
+    pattern-either:
+      - pattern: child_process.exec($CMD, ...)
+      - pattern: child_process.execSync($CMD, ...)
+      - pattern: require("child_process").exec($CMD, ...)
+      - pattern: require("child_process").execSync($CMD, ...)
+      - pattern: import("child_process").exec($CMD, ...)
+
+  - id: repozite.ts-dangerously-set-html
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      dangerouslySetInnerHTML injects raw HTML into the DOM; untrusted
+      data here enables cross-site scripting (XSS).
+    pattern: '<$EL dangerouslySetInnerHTML={{ __html: $VALUE }} />'

@@ -2,6 +2,8 @@
 
 POST /analyze
     Body: {"files": [{"path": "src/app.py", "content": "..."}, ...]}
+    Supported paths: .py, .js, .jsx, .mjs, .cjs, .ts, .tsx -- anything
+    else is reported in meta.skipped without failing the request.
     Returns: {"findings": [{file_path, line_number, rule, severity,
                             description, source}, ...],
               "meta": {files_submitted, files_analyzed, findings_count,
@@ -33,7 +35,10 @@ from analyzer import (
     MAX_FILES,
     MAX_FILE_BYTES,
     MAX_TOTAL_BYTES,
+    SyntaxCheckToolError,
     analyze,
+    check_syntax,
+    classify_path,
     is_sensitive_path,
 )
 
@@ -41,9 +46,6 @@ app = Flask(__name__)
 # Read once at startup; empty string means "token auth disabled" (dev mode).
 app.config["ANALYZER_TOKEN"] = os.environ.get("ANALYZER_TOKEN", "")
 
-# Only .py files are handed to the analysis engines; others are skipped
-# (reported in meta.skipped) instead of failing the whole request.
-PYTHON_SUFFIX = ".py"
 
 
 class ValidationError(Exception):
@@ -103,86 +105,102 @@ def _check_token() -> tuple | None:
     return None
 
 
-@app.post("/analyze")
-def analyze_endpoint():
-    """Analyze a controlled set of Python files and return findings."""
-    denied = _check_token()
-    if denied is not None:
-        return denied
+def _parse_files_payload() -> dict[str, str]:
+    """Parse and validate the {"files": [...]} request body.
 
+    Returns {normalized_path: content}. Raises ValidationError with a
+    client-safe message on any violation (400 path), so every endpoint
+    enforces identical limits and rules.
+    """
     payload = request.get_json(silent=True)
     if payload is None:
-        return _error("Request body must be JSON.", 400)
+        raise ValidationError("Request body must be JSON.")
 
     files_raw = payload.get("files")
     if not isinstance(files_raw, list) or not files_raw:
-        return _error("'files' must be a non-empty list.", 400)
+        raise ValidationError("'files' must be a non-empty list.")
     if len(files_raw) > MAX_FILES:
-        return _error(
-            f"Too many files ({len(files_raw)}); limit is {MAX_FILES}.", 400
+        raise ValidationError(
+            f"Too many files ({len(files_raw)}); limit is {MAX_FILES}."
         )
 
     total_bytes = 0
     files: dict[str, str] = {}
 
+    for i, entry in enumerate(files_raw):
+        if not isinstance(entry, dict):
+            raise ValidationError(f"files[{i}] must be an object.")
+
+        norm_path = _validate_path(entry.get("path"))
+
+        content = entry.get("content")
+        if not isinstance(content, str):
+            raise ValidationError(f"files[{i}].content must be a string.")
+
+        size = len(content.encode("utf-8", errors="replace"))
+        if size > MAX_FILE_BYTES:
+            raise ValidationError(
+                f"File '{norm_path}' is {size} bytes; "
+                f"limit is {MAX_FILE_BYTES}."
+            )
+        total_bytes += size
+        if total_bytes > MAX_TOTAL_BYTES:
+            raise ValidationError(
+                f"Total payload exceeds {MAX_TOTAL_BYTES} bytes."
+            )
+
+        if norm_path in files:
+            raise ValidationError(f"Duplicate path: {norm_path}")
+        files[norm_path] = content
+
+    if not files:
+        raise ValidationError("No analyzable files after validation.")
+    return files
+
+
+@app.post("/analyze")
+def analyze_endpoint():
+    """Analyze a controlled set of source files and return findings."""
+    denied = _check_token()
+    if denied is not None:
+        return denied
+
     try:
-        for i, entry in enumerate(files_raw):
-            if not isinstance(entry, dict):
-                raise ValidationError(f"files[{i}] must be an object.")
-
-            norm_path = _validate_path(entry.get("path"))
-
-            content = entry.get("content")
-            if not isinstance(content, str):
-                raise ValidationError(f"files[{i}].content must be a string.")
-
-            size = len(content.encode("utf-8", errors="replace"))
-            if size > MAX_FILE_BYTES:
-                raise ValidationError(
-                    f"File '{norm_path}' is {size} bytes; "
-                    f"limit is {MAX_FILE_BYTES}."
-                )
-            total_bytes += size
-            if total_bytes > MAX_TOTAL_BYTES:
-                raise ValidationError(
-                    f"Total payload exceeds {MAX_TOTAL_BYTES} bytes."
-                )
-
-            if norm_path in files:
-                raise ValidationError(f"Duplicate path: {norm_path}")
-            files[norm_path] = content
+        files = _parse_files_payload()
     except ValidationError as exc:
         return _error(str(exc), 400)
 
-    if not files:
-        return _error("No analyzable files after validation.", 400)
-
-    # Partition: only .py files go to the engines; others are skipped and
-    # reported so the caller knows exactly what was (not) analyzed.
-    py_files = {
-        p: c for p, c in files.items()
-        if p.lower().endswith(PYTHON_SUFFIX)
+    # Partition: supported source files go to their language engines;
+    # everything else is skipped and reported so the caller knows exactly
+    # what was (not) analyzed.
+    buckets: dict[str, dict[str, str]] = {
+        "python": {}, "javascript": {}, "typescript": {},
     }
-    skipped = [
-        {"path": p, "reason": "not a Python file"}
-        for p in sorted(files)
-        if not p.lower().endswith(PYTHON_SUFFIX)
-    ]
+    skipped = []
+    for p in sorted(files):
+        lang = classify_path(p)
+        if lang is None:
+            skipped.append({"path": p, "reason": "unsupported file type"})
+        else:
+            buckets[lang][p] = files[p]
+
+    analyzed = sum(len(bucket) for bucket in buckets.values())
 
     findings: list[dict] = []
-    if py_files:
+    if analyzed:
         # Sandbox: write files only into a tempdir we created, analyze,
         # delete. Nothing outside this directory is ever touched.
         try:
             with tempfile.TemporaryDirectory(prefix="repozite-analyze-") as tmp:
                 sandbox = Path(tmp)
-                for rel, content in py_files.items():
-                    target = sandbox / rel
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    # Binary-safe write; tools handle encoding detection.
-                    target.write_bytes(content.encode("utf-8", errors="replace"))
+                for bucket in buckets.values():
+                    for rel, content in bucket.items():
+                        target = sandbox / rel
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        # Binary-safe write; tools handle encoding detection.
+                        target.write_bytes(content.encode("utf-8", errors="replace"))
 
-                findings = analyze(py_files, sandbox)
+                findings = analyze(buckets, sandbox)
         except Exception:
             # Never leak internals; a generic 500 keeps stack traces server-side.
             return _error("Analysis failed unexpectedly.", 500)
@@ -191,11 +209,64 @@ def analyze_endpoint():
         "findings": findings,
         "meta": {
             "files_submitted": len(files),
-            "files_analyzed": len(py_files),
+            "files_analyzed": analyzed,
             "findings_count": len(findings),
             "skipped": skipped,
         },
     })
+
+
+@app.post("/check-syntax")
+def check_syntax_endpoint():
+    """Parse-only syntax check for submitted files (the agent's syntax gate).
+
+    Returns {"results": [{"path", "ok", "line", "message"}, ...]} for
+    every supported submitted file. Contents are parsed, never executed.
+    When a language toolchain itself cannot run this answers 503 -- an
+    unchecked file is NEVER reported as ok.
+    """
+    denied = _check_token()
+    if denied is not None:
+        return denied
+
+    try:
+        files = _parse_files_payload()
+    except ValidationError as exc:
+        return _error(str(exc), 400)
+
+    buckets: dict[str, dict[str, str]] = {
+        "python": {}, "javascript": {}, "typescript": {},
+    }
+    for p in sorted(files):
+        lang = classify_path(p)
+        if lang is not None:
+            buckets[lang][p] = files[p]
+
+    if not any(buckets.values()):
+        return jsonify({"results": []})
+
+    try:
+        # Sandbox: write files only into a tempdir we created, parse,
+        # delete. Nothing outside this directory is ever touched.
+        with tempfile.TemporaryDirectory(prefix="repozite-syntax-") as tmp:
+            sandbox = Path(tmp)
+            for bucket in buckets.values():
+                for rel, content in bucket.items():
+                    target = sandbox / rel
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(content.encode("utf-8", errors="replace"))
+            results = check_syntax(
+                buckets["python"],
+                buckets["javascript"],
+                buckets["typescript"],
+                sandbox,
+            )
+    except SyntaxCheckToolError as exc:
+        return _error(str(exc), 503)
+    except Exception:
+        return _error("Syntax check failed unexpectedly.", 500)
+
+    return jsonify({"results": results})
 
 
 @app.get("/health")

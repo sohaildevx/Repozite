@@ -5,8 +5,9 @@ The AI model is asked for ONE minimal fix in JSON form:
     {"path": "pkg/module.py", "old_code": "...", "new_code": "..."}
 
 Rules (all enforced here -- the model's output is untrusted data):
-- "path" must exactly match one file in the snapshot, end with .py and not
-  be a sensitive path. No traversal, no absolute paths, no new files.
+- "path" must exactly match one file in the snapshot, be a supported
+  source file (.py/.js/.jsx/.mjs/.cjs/.ts/.tsx) and not be a sensitive
+  path. No traversal, no absolute paths, no new files.
 - "old_code" must appear EXACTLY ONCE in the current file, otherwise the
   patch is ambiguous and is rejected.
 - "new_code" must be present and differ from "old_code".
@@ -19,7 +20,7 @@ workspace. The user's GitHub repository is never touched.
 import difflib
 from pathlib import Path
 
-from .snapshot import is_sensitive_path
+from .snapshot import ANALYZABLE_SUFFIXES, is_sensitive_path
 
 # Stored diffs are truncated well below this bound.
 MAX_DIFF_CHARS = 20_000
@@ -52,8 +53,8 @@ def parse_patch(reply, snapshot) -> dict:
         raise PatchError("AI patch is missing a file path.")
     if "\\" in path or path.startswith("/") or ".." in path.split("/"):
         raise PatchError("AI patch has an invalid file path.")
-    if not path.endswith(".py"):
-        raise PatchError("AI patch targets a non-Python file.")
+    if not path.lower().endswith(ANALYZABLE_SUFFIXES):
+        raise PatchError("AI patch targets an unsupported file type.")
     if is_sensitive_path(path):
         raise PatchError("AI patch targets a sensitive file.")
     if path not in snapshot.files:

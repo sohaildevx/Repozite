@@ -92,6 +92,57 @@ def call_analyzer(files: list[dict]) -> dict:
     return payload
 
 
+def call_check_syntax(files: list[dict]) -> list[dict]:
+    """POST files to the analyzer's /check-syntax endpoint.
+
+    `files` is a list of {"path": str, "content": str} dicts. Returns the
+    raw per-file result list:
+        [{"path": str, "ok": bool, "line": int, "message": str}, ...]
+
+    Raises AnalyzerTimeout / AnalyzerUnavailable on failure -- the caller
+    records an honest "could not check" error, never a fake pass.
+    """
+    url = settings.ANALYZER_URL.rstrip("/") + "/check-syntax"
+    timeout = settings.ANALYZER_TIMEOUT_SECONDS
+
+    token = settings.ANALYZER_TOKEN
+    headers = {"X-Analyzer-Token": token} if token else None
+
+    try:
+        response = requests.post(
+            url,
+            json={"files": files},
+            timeout=timeout,
+            headers=headers,
+        )
+    except requests.Timeout:
+        raise AnalyzerTimeout(
+            f"Analyzer did not respond within {timeout} seconds."
+        )
+    except requests.RequestException:
+        raise AnalyzerUnavailable("Analyzer service is unreachable.")
+
+    if response.status_code != 200:
+        logger.warning(
+            "Analyzer check-syntax returned %s: %.200s",
+            response.status_code,
+            response.text,
+        )
+        raise AnalyzerUnavailable(
+            f"Analyzer returned status {response.status_code}."
+        )
+
+    try:
+        payload = response.json()
+    except ValueError:
+        raise AnalyzerUnavailable("Analyzer returned invalid JSON.")
+
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+        raise AnalyzerUnavailable("Analyzer response missing 'results'.")
+
+    return payload["results"]
+
+
 def run_analysis(repository, files: list[dict], user=None) -> AnalysisRun:
     """Full pipeline: create run -> call analyzer -> save issues.
 
@@ -115,7 +166,7 @@ def run_analysis(repository, files: list[dict], user=None) -> AnalysisRun:
         findings = payload.get("findings", [])
         _save_findings(run, findings)
         run.status = RunStatus.COMPLETED
-        # Prefer Flask's own count: non-.py files were skipped, not analyzed.
+        # Prefer Flask's own count: non-source files were skipped, not analyzed.
         meta = payload.get("meta") or {}
         analyzed = meta.get("files_analyzed", len(files))
         run.files_analyzed = analyzed

@@ -6,9 +6,11 @@ Run from the analyzer/ directory:
 Covers:
 - valid requests return normalized findings (file_path, line_number, rule,
   severity, description, source)
-- source attribution per engine (ast / ruff / bandit)
+- source attribution per engine (ast / ruff / bandit / eslint / tsc / semgrep)
 - invalid syntax handled as a finding, not a crash
-- unsupported (non-.py) files skipped gracefully
+- unsupported (non-source) files skipped gracefully
+- JS/TS files analyzed by the real ESLint/tsc/Semgrep toolchain, and
+  Python-only requests provably run none of those tools
 - empty/malformed requests, oversized files, excessive file counts
 - sensitive files (.env, *.pem, id_rsa) rejected
 - path traversal / absolute paths rejected
@@ -141,7 +143,7 @@ class SourceAttributionTests(AnalyzerTestCase):
 
 
 class UnsupportedFileTests(AnalyzerTestCase):
-    """Non-.py files are skipped gracefully, not rejected or analyzed."""
+    """Unsupported files are skipped gracefully, not rejected or analyzed."""
 
     def test_only_txt_file_returns_200_with_skip(self):
         resp = self._post([
@@ -153,7 +155,8 @@ class UnsupportedFileTests(AnalyzerTestCase):
         self.assertEqual(data["meta"]["files_analyzed"], 0)
         self.assertEqual(data["meta"]["files_submitted"], 1)
         self.assertEqual(data["meta"]["skipped"],
-                         [{"path": "README.md", "reason": "not a Python file"}])
+                         [{"path": "README.md",
+                           "reason": "unsupported file type"}])
 
     def test_mixed_files_analyze_only_python(self):
         resp = self._post([
@@ -170,6 +173,229 @@ class UnsupportedFileTests(AnalyzerTestCase):
         # And findings only reference the analyzed file:
         self.assertEqual({f["file_path"] for f in data["findings"]},
                          {"app.py"})
+
+
+class JavaScriptTypeScriptTests(AnalyzerTestCase):
+    """JS/TS files flow through ESLint/tsc/Semgrep; Python stays intact.
+
+    These tests run the REAL toolchain (node + bundled eslint config,
+    ts_check.js, semgrep + bundled rules) against temporary sources.
+    """
+
+    def test_js_file_gets_eslint_and_semgrep_findings(self):
+        resp = self._post([
+            {"path": "app.js",
+             "content": "const unused = 1;\neval('2');\n"},
+        ])
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["meta"]["files_analyzed"], 1)
+        sources = {f["source"] for f in data["findings"]}
+        rules = {f["rule"] for f in data["findings"]}
+        # ESLint: unused variable + eval, with its own rule IDs...
+        self.assertIn("eslint", sources)
+        self.assertIn("no-unused-vars", rules)
+        self.assertIn("no-eval", rules)
+        # Semgrep: the bundled security rule fired too...
+        self.assertIn("semgrep", sources)
+        self.assertIn("js-eval", rules)
+        # ...and the Python engines never touched the JS file.
+        for python_engine in ("ast", "ruff", "bandit"):
+            self.assertNotIn(python_engine, sources)
+
+    def test_ts_type_error_reported_by_tsc(self):
+        resp = self._post([
+            {"path": "bad.ts",
+             "content": 'const n: number = "str";\nexport {};\n'},
+        ])
+        self.assertEqual(resp.status_code, 200)
+        findings = resp.get_json()["findings"]
+        tsc = [f for f in findings if f["source"] == "tsc"]
+        self.assertTrue(tsc, f"expected tsc findings, got: {findings}")
+        self.assertTrue(all(f["rule"].startswith("TS2") for f in tsc))
+        self.assertTrue(all(f["severity"] == "medium" for f in tsc))
+        self.assertEqual(tsc[0]["file_path"], "bad.ts")
+
+    def test_ts_syntax_error_is_high_severity(self):
+        resp = self._post([
+            {"path": "broken.tsx",
+             "content": "export const C = () => <div>;\n"},
+        ])
+        self.assertEqual(resp.status_code, 200)
+        findings = resp.get_json()["findings"]
+        tsc_syntax = [f for f in findings
+                      if f["source"] == "tsc" and f["rule"].startswith("TS1")]
+        self.assertTrue(
+            tsc_syntax,
+            f"expected a TS1xxx syntax finding, got: {findings}",
+        )
+        for f in tsc_syntax:
+            self.assertEqual(f["severity"], "high")
+
+    def test_mixed_python_and_js_request_runs_both_engine_sets(self):
+        resp = self._post([
+            {"path": "app.py", "content": "eval('1')\n"},
+            {"path": "app.js", "content": "eval('1');\n"},
+            {"path": "notes.txt", "content": "hello\n"},
+        ])
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["meta"]["files_analyzed"], 2)
+        self.assertEqual(data["meta"]["skipped"],
+                         [{"path": "notes.txt",
+                           "reason": "unsupported file type"}])
+        by_file = {}
+        for f in data["findings"]:
+            by_file.setdefault(f["file_path"], set()).add(f["source"])
+        self.assertIn("ast", by_file["app.py"])
+        self.assertNotIn("eslint", by_file["app.py"])
+        self.assertIn("eslint", by_file["app.js"])
+        self.assertNotIn("ast", by_file["app.js"])
+
+    def test_python_only_request_runs_no_js_tools(self):
+        """Python scans must not pay for (or depend on) the JS toolchain."""
+        real_run = subprocess.run
+        commands = []
+
+        def spy(cmd, *args, **kwargs):
+            commands.append(" ".join(str(c) for c in cmd))
+            return real_run(cmd, *args, **kwargs)
+
+        with patch("analyzer.subprocess.run", side_effect=spy):
+            resp = self._post([
+                {"path": "ok.py", "content": "x = 1\n"},
+            ])
+        self.assertEqual(resp.status_code, 200)
+        joined = " || ".join(commands)
+        for tool_marker in ("eslint", "ts_check", "semgrep"):
+            self.assertNotIn(tool_marker, joined)
+        
+        self.assertIn("ruff", joined)
+        self.assertIn("bandit", joined)
+
+    def test_missing_node_reports_eslint_tool_error(self):
+        with patch("analyzer.shutil.which", return_value=None):
+            resp = self._post([
+                {"path": "app.js", "content": "const x = 1;\n"},
+            ])
+        self.assertEqual(resp.status_code, 200)
+        findings = resp.get_json()["findings"]
+        self.assertTrue(
+            any(f["source"] == "eslint" and f["rule"] == "TOOL_ERROR"
+                for f in findings),
+            f"expected an eslint TOOL_ERROR finding, got: {findings}",
+        )
+
+    def test_js_tool_timeout_reports_findings_not_crash(self):
+        with patch("analyzer.subprocess.run",
+                   side_effect=subprocess.TimeoutExpired(cmd="x", timeout=30)):
+            resp = self._post([
+                {"path": "app.js", "content": "x;\n"},
+            ])
+        self.assertEqual(resp.status_code, 200)
+        findings = resp.get_json()["findings"]
+        timeouts = [f for f in findings if f["rule"] == "TOOL_TIMEOUT"]
+        self.assertEqual({f["source"] for f in timeouts},
+                         {"eslint", "semgrep"})
+        for f in timeouts:
+            self.assertNotIn("Traceback", f["description"])
+
+
+class CheckSyntaxTests(AnalyzerTestCase):
+    """POST /check-syntax: parse-only verdicts per file, no execution."""
+
+    def _post_syntax(self, files):
+        return self.client.post(
+            "/check-syntax",
+            data=json.dumps({"files": files}),
+            headers={"Content-Type": "application/json"},
+        )
+
+    def test_python_ok_and_error(self):
+        resp = self._post_syntax([
+            {"path": "good.py", "content": "x = 1\n"},
+            {"path": "bad.py", "content": "def foo(:\n"},
+        ])
+        self.assertEqual(resp.status_code, 200)
+        results = {r["path"]: r for r in resp.get_json()["results"]}
+        self.assertTrue(results["good.py"]["ok"])
+        self.assertFalse(results["bad.py"]["ok"])
+        self.assertEqual(results["bad.py"]["line"], 1)
+        self.assertTrue(results["bad.py"]["message"])
+
+    def test_js_syntax_error_detected(self):
+        resp = self._post_syntax([
+            {"path": "bad.js", "content": "const x = ;\n"},
+        ])
+        self.assertEqual(resp.status_code, 200)
+        entry = resp.get_json()["results"][0]
+        self.assertEqual(entry["path"], "bad.js")
+        self.assertFalse(entry["ok"])
+        self.assertIsInstance(entry["line"], int)
+        self.assertTrue(entry["message"])
+
+    def test_jsx_file_parses(self):
+        resp = self._post_syntax([
+            {"path": "ok.jsx",
+             "content": "const A = () => <div className='x' />;\n"
+                        "export default A;\n"},
+        ])
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["results"][0]["ok"])
+
+    def test_valid_ts_ok(self):
+        resp = self._post_syntax([
+            {"path": "ok.ts", "content": "export const n: number = 1;\n"},
+        ])
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["results"][0]["ok"])
+
+    def test_ts_syntax_error_detected(self):
+        resp = self._post_syntax([
+            {"path": "bad.tsx", "content": "export const C = () => <div>;\n"},
+        ])
+        self.assertEqual(resp.status_code, 200)
+        entry = resp.get_json()["results"][0]
+        self.assertFalse(entry["ok"])
+        self.assertTrue(entry["message"])
+
+    def test_type_errors_are_not_syntax_errors(self):
+        """--syntax-only: a pure type error must NOT fail the syntax gate."""
+        resp = self._post_syntax([
+            {"path": "typed.ts", "content": 'const n: number = "str";\n'},
+        ])
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["results"][0]["ok"])
+
+    def test_unsupported_files_excluded(self):
+        resp = self._post_syntax([
+            {"path": "README.md", "content": "# hi\n"},
+        ])
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["results"], [])
+
+    def test_missing_node_on_js_is_503_not_ok(self):
+        with patch("analyzer.shutil.which", return_value=None):
+            resp = self._post_syntax([
+                {"path": "app.js", "content": "const x = 1;\n"},
+            ])
+        self.assertEqual(resp.status_code, 503)
+        self.assertIn("error", resp.get_json())
+
+    def test_python_only_needs_no_node(self):
+        """The Python gate must keep working on machines without node."""
+        with patch("analyzer.shutil.which", return_value=None):
+            resp = self._post_syntax([
+                {"path": "ok.py", "content": "x = 1\n"},
+            ])
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["results"][0]["ok"])
+
+    def test_path_traversal_rejected(self):
+        resp = self._post_syntax([
+            {"path": "../../etc/passwd", "content": "x\n"},
+        ])
+        self.assertEqual(resp.status_code, 400)
 
 
 class ToolFailureTests(AnalyzerTestCase):

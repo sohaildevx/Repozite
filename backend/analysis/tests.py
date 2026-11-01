@@ -443,6 +443,56 @@ class AnalyzerServiceTests(TestCase):
         self.assertIsNone(kwargs["headers"])
 
     @patch("analysis.services.requests.post")
+    def test_call_check_syntax_returns_results(self, mock_post):
+        from .services import call_check_syntax
+
+        mock_post.return_value = _mock_http_ok({
+            "results": [{"path": "app.ts", "ok": False, "line": 3,
+                         "message": "'}' expected."}],
+        })
+        results = call_check_syntax(SAMPLE_FILES)
+        self.assertEqual(results[0]["path"], "app.ts")
+        self.assertFalse(results[0]["ok"])
+        url = mock_post.call_args[0][0]
+        self.assertTrue(url.endswith("/check-syntax"), url)
+
+    @patch("analysis.services.requests.post")
+    def test_call_check_syntax_timeout_raises_typed_error(self, mock_post):
+        from .services import call_check_syntax
+
+        mock_post.side_effect = http_requests.Timeout("slow")
+        with self.assertRaises(AnalyzerTimeout):
+            call_check_syntax(SAMPLE_FILES)
+
+    @patch("analysis.services.requests.post")
+    def test_call_check_syntax_unreachable_raises_typed_error(self, mock_post):
+        from .services import call_check_syntax
+
+        mock_post.side_effect = http_requests.ConnectionError("down")
+        with self.assertRaises(AnalyzerUnavailable):
+            call_check_syntax(SAMPLE_FILES)
+
+    @patch("analysis.services.requests.post")
+    def test_call_check_syntax_non_200_raises_typed_error(self, mock_post):
+        from .services import call_check_syntax
+
+        bad = MagicMock()
+        bad.status_code = 503
+        bad.text = "service unavailable"
+        mock_post.return_value = bad
+        with self.assertRaises(AnalyzerUnavailable):
+            call_check_syntax(SAMPLE_FILES)
+
+    @patch("analysis.services.requests.post")
+    def test_call_check_syntax_missing_results_raises_typed_error(self, mock_post):
+        from .services import call_check_syntax
+
+        # A /analyze-shaped payload is NOT a valid /check-syntax response.
+        mock_post.return_value = _mock_http_ok({"findings": []})
+        with self.assertRaises(AnalyzerUnavailable):
+            call_check_syntax(SAMPLE_FILES)
+
+    @patch("analysis.services.requests.post")
     def test_summary_uses_files_analyzed_not_submitted(self, mock_post):
         """Files the analyzer skipped (non-.py) must not be claimed analyzed."""
         mock_post.return_value = _mock_http_ok({
@@ -1299,6 +1349,34 @@ class AgentFixtureMixin:
         )
 
 
+class SystemPromptLanguageTests(SimpleTestCase):
+    """_system_prompt_for: byte-identical for Python, localized for JS/TS."""
+
+    def test_python_gets_the_original_prompt_unchanged(self):
+        from analysis.agent_service import _SYSTEM_PROMPT, _system_prompt_for
+
+        self.assertIs(_system_prompt_for("app.py"), _SYSTEM_PROMPT)
+        self.assertIs(_system_prompt_for("src/pkg.py"), _SYSTEM_PROMPT)
+        self.assertIn("Python bug-fixing assistant", _SYSTEM_PROMPT)
+
+    def test_javascript_prompt_names_javascript(self):
+        from analysis.agent_service import _system_prompt_for
+
+        prompt = _system_prompt_for("src/app.js")
+        self.assertIn("JavaScript bug-fixing assistant", prompt)
+        self.assertNotIn("Python", prompt)
+       
+        self.assertIn("untrusted DATA", prompt)
+        self.assertIn("BYTE-FOR-BYTE", prompt)
+
+    def test_typescript_prompt_names_typescript(self):
+        from analysis.agent_service import _system_prompt_for
+
+        prompt = _system_prompt_for("components/App.tsx")
+        self.assertIn("TypeScript bug-fixing assistant", prompt)
+        self.assertNotIn("Python", prompt)
+
+
 class PatchingUnitTests(SimpleTestCase):
     """parse_patch / apply_patch / make_diff: untrusted-patch validation."""
 
@@ -1330,6 +1408,20 @@ class PatchingUnitTests(SimpleTestCase):
         bad = dict(GOOD_PATCH, path="README.md")
         with self.assertRaises(PatchError):
             parse_patch(bad, snap)
+
+    def test_js_source_file_accepted(self):
+        snap = make_snapshot({"lib.js": "export const x = 1;\n"})
+        good = dict(GOOD_PATCH, path="lib.js",
+                    old_code="export const x = 1;",
+                    new_code="export const x = 2;")
+        self.assertEqual(parse_patch(good, snap)["path"], "lib.js")
+
+    def test_ts_source_file_accepted(self):
+        snap = make_snapshot({"app.ts": "export const n: number = 1;\n"})
+        good = dict(GOOD_PATCH, path="app.ts",
+                    old_code="export const n: number = 1;",
+                    new_code="export const n: number = 2;")
+        self.assertEqual(parse_patch(good, snap)["path"], "app.ts")
 
     def test_sensitive_path_rejected(self):
         snap = make_snapshot({".env.py": "SECRET = 1\n"})
@@ -1726,8 +1818,84 @@ class SnapshotUnitTests(SimpleTestCase):
         self.assertNotIn("secrets.py", snap.files)
         self.assertTrue(any("secrets.py" in s for s in snap.skipped))
         self.assertTrue(any("big.py" in s for s in snap.skipped))
-        # Non-.py files are filtered by extension and are not "skipped".
+        # Non-source files are filtered by extension and are not "skipped".
         self.assertFalse(any("README" in s for s in snap.skipped))
+
+    def test_fetch_includes_js_and_ts_sources(self):
+        """JS/TS sources join the snapshot; junk/minified files stay out."""
+        py_blob = _base64.b64encode(BUGGY_SOURCE.encode()).decode()
+        js_blob = _base64.b64encode(b"console.log('hi');\n").decode()
+        ds_blob = _base64.b64encode(b"declare const version: number;\n").decode()
+        responses = [
+            dict(data={"default_branch": "main"}),
+            dict(data={"sha": "c" * 40}),
+            dict(data={"truncated": False, "tree": [
+                {"type": "blob", "path": "src/app.py", "sha": "fp1",
+                 "size": 40},
+                {"type": "blob", "path": "src/main.js", "sha": "fj1",
+                 "size": 30},
+                {"type": "blob", "path": "src/util.mjs", "sha": "fm1",
+                 "size": 30},
+                {"type": "blob", "path": "src/component.tsx", "sha": "fx1",
+                 "size": 30},
+                {"type": "blob", "path": "src/store.ts", "sha": "ft1",
+                 "size": 30},
+                {"type": "blob", "path": "src/globals.d.ts", "sha": "fd1",
+                 "size": 30},
+                # Each line below must be filtered WITHOUT a skipped entry:
+                {"type": "blob", "path": "src/styles.css", "sha": "fc1",
+                 "size": 30},          # unsupported extension
+                {"type": "blob", "path": "src/app.min.js", "sha": "fn1",
+                 "size": 30},          # minified bundle
+                {"type": "blob", "path": "node_modules/dep.js", "sha": "fn2",
+                 "size": 30},          # vendored dependency dir
+                {"type": "blob", "path": "dist/out.js", "sha": "fn3",
+                 "size": 30},          # build output dir
+                {"type": "blob", "path": "build/gen.py", "sha": "fn4",
+                 "size": 40},          # build dir applies to .py as well
+            ]}),
+            # Six blob downloads, in tree order, for the six real candidates.
+            dict(data={"encoding": "base64", "content": py_blob}),
+            dict(data={"encoding": "base64", "content": js_blob}),
+            dict(data={"encoding": "base64", "content": js_blob}),
+            dict(data={"encoding": "base64", "content": js_blob}),
+            dict(data={"encoding": "base64", "content": js_blob}),
+            dict(data={"encoding": "base64", "content": ds_blob}),
+        ]
+        with patch("analysis.snapshot.requests.Session",
+                   return_value=_fake_github(responses)):
+            snap = fetch_github_snapshot(
+                _NS(github_url="https://github.com/octo/hello")
+            )
+        self.assertEqual(set(snap.files), {
+            "src/app.py", "src/main.js", "src/util.mjs",
+            "src/component.tsx", "src/store.ts", "src/globals.d.ts",
+        })
+        
+        self.assertEqual(snap.skipped, [])
+
+    def test_pure_python_repo_selection_is_unchanged(self):
+        """A .py-only tree selects exactly its .py files, no skips."""
+        blob = _base64.b64encode(BUGGY_SOURCE.encode()).decode()
+        responses = [
+            dict(data={"default_branch": "main"}),
+            dict(data={"sha": "c" * 40}),
+            dict(data={"truncated": False, "tree": [
+                {"type": "blob", "path": "pkg/util.py", "sha": "pp1",
+                 "size": 40},
+                {"type": "blob", "path": "pkg/core.py", "sha": "pp2",
+                 "size": 40},
+            ]}),
+            dict(data={"encoding": "base64", "content": blob}),
+            dict(data={"encoding": "base64", "content": blob}),
+        ]
+        with patch("analysis.snapshot.requests.Session",
+                   return_value=_fake_github(responses)):
+            snap = fetch_github_snapshot(
+                _NS(github_url="https://github.com/octo/hello")
+            )
+        self.assertEqual(set(snap.files), {"pkg/util.py", "pkg/core.py"})
+        self.assertEqual(snap.skipped, [])
 
     def test_fetch_maps_404_to_safe_error(self):
         with patch("analysis.snapshot.requests.Session",
@@ -1770,13 +1938,17 @@ class AgentServiceTests(AgentFixtureMixin, TestCase):
     """Full lifecycle with snapshot, AI, analyzer and sandbox mocked."""
 
     def _run_with(self, snapshot=None, chat=None, analyzer=None,
-                  sandbox=_SENTINEL):
+                  sandbox=_SENTINEL, syntax=_SENTINEL, issue=None):
         """Drive run_agent with all externals mocked.
 
         - chat / analyzer: a dict -> single return value; a list -> a
           sequence of per-attempt values (side_effect).
         - sandbox: _SENTINEL -> default passing result; None -> sandbox
           unavailable; a list -> per-attempt results.
+        - syntax: _SENTINEL -> echo "ok" for whatever file is checked;
+          a list -> per-call results (exceptions raise); a dict -> single
+          return value.
+        - issue: defaults to the fixture's app.py issue.
         """
         snap = snapshot or make_snapshot()
         chat_kw = (
@@ -1793,6 +1965,15 @@ class AgentServiceTests(AgentFixtureMixin, TestCase):
             sandbox_kw = {"side_effect": sandbox}
         else:
             sandbox_kw = {"return_value": sandbox}
+        if syntax is _SENTINEL:
+            syntax_kw = {"side_effect": lambda files: [
+                {"path": f["path"], "ok": True, "line": 1, "message": ""}
+                for f in files
+            ]}
+        elif isinstance(syntax, list):
+            syntax_kw = {"side_effect": syntax}
+        else:
+            syntax_kw = {"return_value": syntax}
         with patch(
             "analysis.agent_service.fetch_github_snapshot", return_value=snap
         ), patch(
@@ -1800,9 +1981,11 @@ class AgentServiceTests(AgentFixtureMixin, TestCase):
         ), patch(
             "analysis.agent_service.call_analyzer", **analyzer_kw
         ), patch(
+            "analysis.agent_service.call_check_syntax", **syntax_kw
+        ), patch(
             "analysis.sandbox.run_tests", **sandbox_kw
         ):
-            return run_agent(self.issue)
+            return run_agent(issue or self.issue)
 
     def test_successful_run_completes_and_persists(self):
         run = self._run_with()
@@ -1825,6 +2008,88 @@ class AgentServiceTests(AgentFixtureMixin, TestCase):
         self.assertEqual(results["syntax:app.py"], TestStatus.PASSED)
         self.assertEqual(results["static-analysis"], TestStatus.PASSED)
         self.assertEqual(results["tests"], TestStatus.PASSED)
+
+    
+
+    JS_SOURCE = "const greeting = 'hello';\neval('1 + 1');\n"
+    JS_PATCH = {
+        "path": "app.js",
+        "old_code": "const greeting = 'hello';\neval('1 + 1');",
+        "new_code": "eval('1 + 1');",
+        "explanation": "Remove the unused greeting binding.",
+    }
+
+    def _js_issue(self):
+        return Issue.objects.create(
+            analysis_run=self.analysis_run,
+            file_path="app.js",
+            line_number=2,
+            severity=Severity.LOW,
+            rule="no-unused-vars",
+            source="eslint",
+            description="'greeting' is assigned a value but never used.",
+        )
+
+    def test_javascript_run_gates_syntax_via_analyzer(self):
+        """Full JS pipeline: snapshot -> patch -> remote syntax -> checks."""
+        snap = make_snapshot({"app.js": self.JS_SOURCE})
+        run = self._run_with(snapshot=snap, chat=self.JS_PATCH,
+                             issue=self._js_issue())
+        self.assertEqual(run.status, RunStatus.COMPLETED)
+        self.assertEqual(run.verification_status, VerificationStatus.VERIFIED)
+        results = {r.test_name: r.status for r in run.test_results.all()}
+        self.assertEqual(results["syntax:app.js"], TestStatus.PASSED)
+        self.assertEqual(results["static-analysis"], TestStatus.PASSED)
+        self.assertEqual(results["tests"], TestStatus.PASSED)
+        changes = list(run.code_changes.all())
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0].file_path, "app.js")
+
+    def test_js_syntax_failure_is_recorded_and_fails_run(self):
+        snap = make_snapshot({"app.js": self.JS_SOURCE})
+        bad_syntax = [{"path": "app.js", "ok": False, "line": 2,
+                       "message": "Unexpected token '; '"}]
+        run = self._run_with(snapshot=snap, chat=self.JS_PATCH,
+                             issue=self._js_issue(),
+                             syntax=[bad_syntax, bad_syntax])
+        self.assertEqual(run.status, RunStatus.FAILED)
+        results = {r.test_name: r.status for r in run.test_results.all()}
+        self.assertEqual(results["syntax:app.js"], TestStatus.FAILED)
+        rows = list(run.test_results.filter(test_name="syntax:app.js"))
+        self.assertEqual(len(rows), 2)  # checked on both attempts
+        self.assertIn("SyntaxError (line 2)", rows[0].output)
+        self.assertIn("syntax check failed for app.js", run.final_summary)
+        self.assertNotIn("attempt succeeded", run.final_summary)
+
+    def test_js_syntax_checker_outage_is_error_not_failed(self):
+        """No checker -> ERROR ("could not run"), never a syntax verdict."""
+        from .services import AnalyzerTimeout
+
+        snap = make_snapshot({"app.js": self.JS_SOURCE})
+        outage = AnalyzerTimeout("Analyzer did not respond within 90 seconds.")
+        run = self._run_with(snapshot=snap, chat=self.JS_PATCH,
+                             issue=self._js_issue(),
+                             syntax=[outage, outage])
+        self.assertEqual(run.status, RunStatus.FAILED)
+        results = {r.test_name: r.status for r in run.test_results.all()}
+        self.assertEqual(results["syntax:app.js"], TestStatus.ERROR)
+        # The summary must not invent a syntax error that was never found.
+        self.assertNotIn("syntax error", run.final_summary)
+
+    def test_static_gate_reads_real_findings_key(self):
+        """Production /analyze answers with "findings", not "issues"."""
+        dirty = {"summary": "1 issue", "files_analyzed": 1,
+                 "findings": [{"file_path": "app.py", "line_number": 1,
+                               "rule": "F401", "severity": "medium",
+                               "source": "ruff",
+                               "description": "unused import"}]}
+        run = self._run_with(analyzer=[dirty, dirty])
+        # Same verdict shape as the "issues"-key twin above: a dirty static
+        # result is a verification failure, not an execution crash.
+        self.assertEqual(run.status, RunStatus.COMPLETED)
+        self.assertEqual(run.verification_status, VerificationStatus.FAILED)
+        results = {r.test_name: r.status for r in run.test_results.all()}
+        self.assertEqual(results["static-analysis"], TestStatus.FAILED)
 
     def test_original_workspace_not_required_after_run(self):
         # The temp workspace must be gone; nothing may persist on disk.
@@ -2601,12 +2866,12 @@ class PublicScanAPITests(APITestCase):
         from .snapshot import SnapshotError
 
         mock_snap.side_effect = SnapshotError(
-            "No analyzable Python files were found in the repository snapshot."
+            "No analyzable source files were found in the repository snapshot."
         )
 
         resp = self._post_scan()
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("No analyzable Python files", resp.data["detail"])
+        self.assertIn("No analyzable source files", resp.data["detail"])
 
     @patch("analysis.services.requests.post")
     @patch("analysis.views.fetch_github_snapshot")

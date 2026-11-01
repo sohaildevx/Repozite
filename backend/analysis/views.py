@@ -185,7 +185,7 @@ class AnalysisScanCreateView(CreateAPIView):
 
     The public entry point of the product: the client sends only a URL;
     the backend validates it (Phase 4 SSRF rules), fetches a bounded
-    Python snapshot (Phase 7 limits: 40 files, 100 KB/file, 1 MB total,
+    source snapshot (Phase 7 limits: 40 files, 100 KB/file, 1 MB total,
     90 s deadline, sensitive files excluded), runs the analyzer, and
     answers with the finished run.
 
@@ -234,7 +234,7 @@ class AnalysisScanCreateView(CreateAPIView):
                 {"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY
             )
         except SnapshotError as exc:
-            # Safe user-facing messages only (limits, no Python files, ...).
+            
             return Response(
                 {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
             )

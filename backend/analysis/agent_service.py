@@ -44,7 +44,7 @@ from .models import (
     VerificationStatus,
 )
 from .patching import PatchError, apply_patch, make_diff, parse_patch
-from .services import AnalyzerError, call_analyzer
+from .services import AnalyzerError, call_analyzer, call_check_syntax
 from .snapshot import SnapshotError, fetch_github_snapshot
 
 logger = logging.getLogger(__name__)
@@ -85,6 +85,23 @@ _SYSTEM_PROMPT = (
     "expected_behavior states how the fixed code should behave."
 )
 
+
+def _system_prompt_for(path: str) -> str:
+    """Language-aware system prompt for the file being fixed.
+
+    Python gets the exact original prompt (byte-identical -- no behavior
+    change on the long-standing path); JS/TS get the same text with the
+    language name swapped in, so the byte-for-byte patch rules and the
+    untrusted-data defenses are identical in every language.
+    """
+    if path.lower().endswith(".py"):
+        return _SYSTEM_PROMPT
+    if path.lower().endswith((".ts", ".tsx")):
+        language = "TypeScript"
+    else:
+        language = "JavaScript"
+    return _SYSTEM_PROMPT.replace("Python", language)
+
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
@@ -119,7 +136,14 @@ def _record(agent_run, name, status, output, attempt):
 
 
 def _check_syntax(path, content, agent_run, attempt):
-    """Parse-only syntax check. Never executes repository code."""
+    """Parse-only syntax check. Never executes repository code.
+
+    Python stays on the in-process ast.parse path (no services involved);
+    JS/TS files delegate to the analyzer, which owns the language
+    toolchain (espree / the TypeScript compiler).
+    """
+    if not path.lower().endswith(".py"):
+        return _check_syntax_via_analyzer(path, content, agent_run, attempt)
     try:
         ast.parse(content, filename=path)
     except SyntaxError as exc:
@@ -146,6 +170,53 @@ def _check_syntax(path, content, agent_run, attempt):
     return True
 
 
+def _check_syntax_via_analyzer(path, content, agent_run, attempt):
+    """Language-aware syntax check for non-Python files via /check-syntax.
+
+    An analyzer outage is recorded as ERROR ("could not check"), never as
+    a pass and never as a syntax failure the model would pointlessly
+    retry: without the toolchain the file's syntax is unknown.
+    """
+    try:
+        results = call_check_syntax([{"path": path, "content": content}])
+    except AnalyzerError as exc:
+        _record(
+            agent_run,
+            f"syntax:{path}",
+            TestStatus.ERROR,
+            f"Syntax check could not run: {exc}",
+            attempt,
+        )
+        return False
+
+    entry = next(
+        (r for r in results if isinstance(r, dict) and r.get("path") == path),
+        None,
+    )
+    if entry is None:
+        _record(
+            agent_run,
+            f"syntax:{path}",
+            TestStatus.ERROR,
+            "Syntax check returned no result for this file.",
+            attempt,
+        )
+        return False
+    if not entry.get("ok"):
+        line = entry.get("line") or 1
+        message = str(entry.get("message") or "invalid syntax")
+        _record(
+            agent_run,
+            f"syntax:{path}",
+            TestStatus.FAILED,
+            f"SyntaxError (line {line}): {message}",
+            attempt,
+        )
+        return False
+    _record(agent_run, f"syntax:{path}", TestStatus.PASSED, "", attempt)
+    return True
+
+
 def _run_static_checks(agent_run, workspace, changed_paths, attempt):
     """Run ruff and bandit via the Flask analyzer on the changed files only.
 
@@ -158,7 +229,7 @@ def _run_static_checks(agent_run, workspace, changed_paths, attempt):
         # Nothing changed -> nothing to lint; record honestly. A 3-tuple so
         # the caller's unpacking is uniform across every return path.
         _record(agent_run, "static-analysis", TestStatus.SKIPPED,
-                "No changed Python files to check.", attempt)
+                "No changed source files to check.", attempt)
         return True, "", True
 
     payload = []
@@ -178,7 +249,8 @@ def _run_static_checks(agent_run, workspace, changed_paths, attempt):
         # The tool itself failed -- retrying the model would waste a call.
         return False, f"static analysis tool error: {exc}", False
 
-    issues = result.get("issues", [])
+    
+    issues = result.get("issues") or result.get("findings") or []
 
     # A tool-level failure (Ruff/Bandit crashed or timed out) is reported by
     # the analyzer as a finding on path "." with rule TOOL_ERROR/TOOL_TIMEOUT.
@@ -347,7 +419,7 @@ def _validate(agent_run, workspace, original_files, attempt):
     retryable = True
     failures = []
 
-    # Syntax on every changed .py file.
+    # Syntax on every changed file (Python via ast; JS/TS via analyzer).
     for rel in sorted(changed_paths):
         py = workspace / rel
         try:
@@ -361,7 +433,10 @@ def _validate(agent_run, workspace, original_files, attempt):
             continue
         if not _check_syntax(rel, content, agent_run, attempt):
             all_passed = False
-            failures.append(f"syntax error in {rel}")
+            # The recorded TestResult row carries the precise reason
+            # (broken syntax vs. an unavailable checker); the run summary
+            # must not claim a syntax error when the checker never ran.
+            failures.append(f"syntax check failed for {rel}")
 
     static_passed, static_fail, static_retryable = _run_static_checks(
         agent_run, workspace, changed_paths, attempt
@@ -559,7 +634,7 @@ def run_agent(issue, user=None, agent_run=None):
             agent_run.tests_ran = None
             agent_run.final_summary = (
                 "Issue file is not present in the fetched snapshot "
-                "(only .py files were fetched)."
+                "(only supported source files were fetched)."
             )
             agent_run.save()
             logger.warning(
@@ -584,7 +659,7 @@ def run_agent(issue, user=None, agent_run=None):
 
             prompt = _build_prompt(issue, snapshot, feedback)
             try:
-                reply = chat_json(_SYSTEM_PROMPT, prompt)
+                reply = chat_json(_system_prompt_for(path), prompt)
             except AIError as exc:
                 # Transport or configuration failure -- retrying will not
                 # fix it, so stop immediately with a safe message.

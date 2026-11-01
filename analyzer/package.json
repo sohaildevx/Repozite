@@ -1,0 +1,14 @@
+{
+  "name": "repozite-analyzer-tools",
+  "private": true,
+  "description": "Pinned JS/TS analysis tooling for the Repozite analyzer. Only the analyzer's OWN bundled config is ever loaded; repository ESLint/TS configs are ignored so untrusted code can never execute here.",
+  "scripts": {
+    "lint": "eslint --no-config-lookup --config eslint.config.mjs ."
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.72.1",
+    "@typescript-eslint/parser": "^8.72.1",
+    "eslint": "^10.14.0",
+    "typescript": "^6.0.3"
+  }
+}

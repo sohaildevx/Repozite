@@ -1,11 +1,13 @@
 """Controlled GitHub source-snapshot provider for agent runs (Phase 7).
 
 STEP B of the agent workflow. Fetches a bounded, in-memory snapshot of the
-target repository's Python sources at a specific commit:
+target repository's sources (Python, JavaScript and TypeScript) at a
+specific commit:
 
 - resolves the default branch, then the exact commit SHA (recorded on the
   AgentRun so results are reproducible),
-- lists the git tree recursively (bounded), keeping only .py blobs,
+- lists the git tree recursively (bounded), keeping only supported source
+  blobs (.py/.js/.jsx/.mjs/.cjs/.ts/.tsx) outside vendored/build dirs,
 - enforces per-file, total-size, file-count and wall-clock limits,
 - never fetches sensitive files (.env, private keys, credentials).
 
@@ -38,10 +40,19 @@ from repositories.services import (
 from .serializers import SENSITIVE_PATTERNS, SENSITIVE_SUFFIXES
 
 # Snapshot limits (deliberately stricter than the analyzer's upload limits).
-SNAPSHOT_MAX_FILES = 40                # .py files fetched per run
+SNAPSHOT_MAX_FILES = 40                # source files fetched per run
 SNAPSHOT_MAX_FILE_BYTES = 100_000      # 100 KB per file
 SNAPSHOT_MAX_TOTAL_BYTES = 1_000_000   # 1 MB total content
 SNAPSHOT_DEADLINE_SECONDS = 90.0       # wall-clock budget for the whole fetch
+
+
+ANALYZABLE_SUFFIXES = (".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx")
+
+EXCLUDED_DIRS = frozenset({
+    "node_modules", "vendor", "dist", "build", "out", "coverage",
+    "target", ".next", ".nuxt", ".venv", "venv", "__pycache__",
+    "site-packages", ".git",
+})
 
 
 BLOB_CACHE_MAX_ENTRIES = 512
@@ -291,7 +302,7 @@ def fetch_github_snapshot(repository) -> Snapshot:
     if not commit_sha:
         raise SnapshotError("Could not determine the repository commit.")
 
-    # 3) Recursive tree listing -> candidate .py blobs, bounded.
+    
     tree = _get_json(
         session,
         f"{GITHUB_API_BASE}/repos/{owner}/{repo}/git/trees/{commit_sha}?recursive=1",
@@ -304,7 +315,13 @@ def fetch_github_snapshot(repository) -> Snapshot:
         if entry.get("type") != "blob":
             continue
         path = entry.get("path") or ""
-        if not path.endswith(".py"):
+        lower = path.lower()
+        
+        if not lower.endswith(ANALYZABLE_SUFFIXES) or lower.endswith(".min.js"):
+            continue
+       
+        parts = path.split("/")
+        if any(seg in EXCLUDED_DIRS for seg in parts[:-1]):
             continue
         if is_sensitive_path(path):
             skipped.append(f"{path} (sensitive file excluded)")
@@ -365,7 +382,7 @@ def fetch_github_snapshot(repository) -> Snapshot:
 
     if not files:
         raise SnapshotError(
-            "No analyzable Python files were found in the repository snapshot."
+            "No analyzable source files were found in the repository snapshot."
         )
 
     return Snapshot(
