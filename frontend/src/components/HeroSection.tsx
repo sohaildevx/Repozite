@@ -22,7 +22,7 @@ export function HeroSection() {
 
       <div className="relative mx-auto max-w-6xl px-6 pt-20 pb-16 text-center md:pt-28 md:pb-20">
         <p className="font-mono text-[11px] tracking-[0.22em] text-muted-foreground uppercase">
-          AI-powered Python analysis
+          AI-powered code analysis
         </p>
 
         <h1
@@ -51,7 +51,10 @@ export function HeroSection() {
 
         <div className="mt-10 flex justify-center">
           <TechnicalMetadata
-            items={['Python / Static analysis', 'AST · Ruff · Bandit']}
+            items={[
+              'Python · JavaScript · TypeScript',
+              'Ruff · Bandit · ESLint · tsc · Semgrep',
+            ]}
           />
         </div>
       </div>

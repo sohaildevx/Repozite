@@ -13,7 +13,7 @@ const STEPS: Step[] = [
     number: '01',
     title: 'Analyze',
     description:
-      'Inspect Python code using AST, Ruff, and Bandit to identify potential issues.',
+      'Inspect Python, JavaScript, and TypeScript using Ruff, Bandit, ESLint, tsc, and Semgrep to identify potential issues.',
     icon: ScanSearch,
   },
   {

@@ -1,4 +1,3 @@
-import { Code } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
 
 const REPO_URL = 'https://github.com/sohaildevx/Repozite'
@@ -10,15 +9,23 @@ export function Footer() {
         <div className="flex flex-col items-start justify-between gap-8 md:flex-row md:items-center">
           <div className="max-w-md">
             <div className="flex items-center gap-2.5">
-              <Code className="size-4 text-primary" aria-hidden="true" />
+              
+              <img
+                src="/logo.svg"
+                alt=""
+                width={32}
+                height={32}
+                aria-hidden="true"
+                className="size-8 shrink-0 rounded-md"
+              />
               <span className="text-sm font-semibold tracking-tight">
                 Repo<span className="text-primary">zite</span>
               </span>
             </div>
             <p className="mt-3 text-[13px] leading-relaxed text-muted-foreground">
-              AI-powered Python code analysis. Find issues, understand their
-              causes, and validate proposed fixes in a restricted
-              environment.
+              AI-powered code analysis for Python, JavaScript, and
+              TypeScript. Find issues, understand their causes, and validate
+              proposed fixes in a restricted environment.
             </p>
           </div>
 
@@ -43,7 +50,8 @@ export function Footer() {
         <Separator className="my-8 bg-border" />
 
         <p className="font-mono text-[11px] tracking-wide text-muted-foreground/70 uppercase">
-          © 2026 Repozite — built for Python repositories
+          © 2026 Repozite — built for Python, JavaScript & TypeScript
+          repositories
         </p>
       </div>
     </footer>
