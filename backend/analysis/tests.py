@@ -2052,7 +2052,10 @@ class AgentServiceTests(AgentFixtureMixin, TestCase):
         run = self._run_with(snapshot=snap, chat=self.JS_PATCH,
                              issue=self._js_issue(),
                              syntax=[bad_syntax, bad_syntax])
-        self.assertEqual(run.status, RunStatus.FAILED)
+        
+        self.assertEqual(run.status, RunStatus.COMPLETED)
+        self.assertEqual(run.verification_status, VerificationStatus.FAILED)
+        self.assertEqual(run.repair_attempts, 2)
         results = {r.test_name: r.status for r in run.test_results.all()}
         self.assertEqual(results["syntax:app.js"], TestStatus.FAILED)
         rows = list(run.test_results.filter(test_name="syntax:app.js"))
@@ -2070,7 +2073,11 @@ class AgentServiceTests(AgentFixtureMixin, TestCase):
         run = self._run_with(snapshot=snap, chat=self.JS_PATCH,
                              issue=self._js_issue(),
                              syntax=[outage, outage])
-        self.assertEqual(run.status, RunStatus.FAILED)
+        
+        self.assertEqual(run.status, RunStatus.COMPLETED)
+        self.assertEqual(
+            run.verification_status, VerificationStatus.PARTIALLY_VERIFIED
+        )
         results = {r.test_name: r.status for r in run.test_results.all()}
         self.assertEqual(results["syntax:app.js"], TestStatus.ERROR)
         # The summary must not invent a syntax error that was never found.

@@ -5,7 +5,9 @@ import tsPlugin from "@typescript-eslint/eslint-plugin";
 
 export default [
   {
-    
+   
+    linterOptions: { reportUnusedDisableDirectives: "off" },
+
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",
