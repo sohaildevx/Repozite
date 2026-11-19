@@ -37,9 +37,13 @@ from repositories.services import (
     parse_github_repo_url,
 )
 
-from .serializers import SENSITIVE_PATTERNS, SENSITIVE_SUFFIXES
+from .serializers import (
+    MAX_FILE_BYTES,
+    SENSITIVE_PATTERNS,
+    SENSITIVE_SUFFIXES,
+)
 
-# Snapshot limits (deliberately stricter than the analyzer's upload limits).
+
 SNAPSHOT_MAX_FILES = 40                # source files fetched per run
 SNAPSHOT_MAX_FILE_BYTES = 100_000      # 100 KB per file
 SNAPSHOT_MAX_TOTAL_BYTES = 1_000_000   # 1 MB total content
@@ -178,6 +182,18 @@ class Snapshot:
             return prefix + chunk + suffix
         return content[:max_bytes] + "\n... [truncated for prompt size] ..."
 
+    def skip_reason(self, path: str) -> str | None:
+        """Why `path` was excluded from the snapshot, if it was recorded.
+
+        Entries are stored as "path (reason)". Returns just the reason so
+        callers can surface a precise failure instead of a generic message.
+        """
+        marker = f"{path} ("
+        for note in self.skipped:
+            if note.startswith(marker) and note.endswith(")"):
+                return note[len(marker):-1]
+        return None
+
 
 def is_sensitive_path(path: str) -> bool:
     """True when a path looks like a secret-bearing file.
@@ -258,8 +274,12 @@ def _get_json(session: requests.Session, url: str, deadline: float) -> dict:
         raise GitHubAPIError("GitHub API returned invalid JSON.")
 
 
-def fetch_github_snapshot(repository) -> Snapshot:
-    """Fetch a bounded snapshot of `repository`'s Python sources.
+def fetch_github_snapshot(repository, required_path=None) -> Snapshot:
+    """Fetch a bounded snapshot of `repository`'s analyzable sources.
+
+    `required_path` is the issue's file. When given, that file is admitted
+    first, before the count and size budgets are applied, so an issue is
+    never unfixable merely because its file sorts late in the git tree.
 
     Raises GitHubError subclasses (safe messages) or SnapshotError on any
     limit violation. Never raises with secrets or host details attached.
@@ -308,9 +328,8 @@ def fetch_github_snapshot(repository) -> Snapshot:
         f"{GITHUB_API_BASE}/repos/{owner}/{repo}/git/trees/{commit_sha}?recursive=1",
         deadline,
     )
-    candidates = []
+    eligible = []
     skipped = []
-    total_bytes = 0
     for entry in tree.get("tree", []):
         if entry.get("type") != "blob":
             continue
@@ -329,11 +348,27 @@ def fetch_github_snapshot(repository) -> Snapshot:
         if not is_safe_rel_path(path):
             skipped.append(f"{path} (unsafe repository path rejected)")
             continue
+        blob_sha = entry.get("sha")
+        if not blob_sha:
+            continue
         try:
             size = int(entry.get("size") or 0)
         except (TypeError, ValueError):
             size = 0
-        if size > SNAPSHOT_MAX_FILE_BYTES:
+        eligible.append((path, size, blob_sha))
+
+    
+    if required_path:
+        eligible.sort(key=lambda item: item[0] != required_path)
+
+    candidates = []
+    total_bytes = 0
+    for path, size, blob_sha in eligible:
+        
+        file_limit = (
+            MAX_FILE_BYTES if path == required_path else SNAPSHOT_MAX_FILE_BYTES
+        )
+        if size > file_limit:
             skipped.append(f"{path} (file exceeds size limit)")
             continue
         if len(candidates) >= SNAPSHOT_MAX_FILES:
@@ -341,9 +376,6 @@ def fetch_github_snapshot(repository) -> Snapshot:
             continue
         if total_bytes + size > SNAPSHOT_MAX_TOTAL_BYTES:
             skipped.append(f"{path} (total size limit reached)")
-            continue
-        blob_sha = entry.get("sha")
-        if not blob_sha:
             continue
         candidates.append((path, blob_sha))
         total_bytes += size

@@ -1296,12 +1296,13 @@ CLEAN_ANALYZER = {"summary": "clean", "files_analyzed": 1, "issues": []}
 _SENTINEL = object()
 
 
-def make_snapshot(files=None):
+def make_snapshot(files=None, skipped=None):
     return Snapshot(
         owner="octo",
         repo="hello",
         commit_sha="a" * 40,
         files=files if files is not None else {"app.py": BUGGY_SOURCE},
+        skipped=skipped or [],
     )
 
 
@@ -1739,6 +1740,74 @@ class SnapshotUnitTests(SimpleTestCase):
         self.assertEqual(snap.files["app.py"], BUGGY_SOURCE)
         self.assertEqual(snap.skipped, [])
 
+    def test_required_file_survives_the_file_count_limit(self):
+        """The issue's own file must win a slot, whatever it sorts as.
+
+        Regression: the count and size budgets ran in GitHub tree order, so
+        an issue in a file sorting past SNAPSHOT_MAX_FILES could never be
+        fixed -- the run failed BEFORE the model was called, surfacing as
+        "attempt 0" with zero checks and "repository tests: not reached".
+        """
+        blob = _base64.b64encode(BUGGY_SOURCE.encode()).decode()
+        tree = dict(data={"truncated": False, "tree": [
+            {"type": "blob", "path": "aaa.py", "sha": "s1", "size": 40},
+            {"type": "blob", "path": "mmm.py", "sha": "s2", "size": 40},
+            {"type": "blob", "path": "zzz.py", "sha": "s3", "size": 40},
+        ]})
+        # zzz.py is fetched first because it is pinned, then tree order.
+        responses = [
+            dict(data={"default_branch": "main"}),
+            dict(data={"sha": "c" * 40}),
+            tree,
+            dict(data={"encoding": "base64", "content": blob}),
+            dict(data={"encoding": "base64", "content": blob}),
+        ]
+        with patch("analysis.snapshot.SNAPSHOT_MAX_FILES", 2), patch(
+            "analysis.snapshot.requests.Session",
+            return_value=_fake_github(responses),
+        ):
+            snap = fetch_github_snapshot(
+                _NS(github_url="https://github.com/octo/hello"),
+                required_path="zzz.py",
+            )
+        self.assertEqual(sorted(snap.files), ["aaa.py", "zzz.py"])
+        self.assertTrue(
+            any("mmm.py" in s and "count limit" in s for s in snap.skipped),
+            snap.skipped,
+        )
+
+    def test_file_count_limit_still_bounds_the_snapshot(self):
+        """Without a required path the cap applies exactly as before."""
+        blob = _base64.b64encode(BUGGY_SOURCE.encode()).decode()
+        tree = dict(data={"truncated": False, "tree": [
+            {"type": "blob", "path": "aaa.py", "sha": "s1", "size": 40},
+            {"type": "blob", "path": "mmm.py", "sha": "s2", "size": 40},
+            {"type": "blob", "path": "zzz.py", "sha": "s3", "size": 40},
+        ]})
+        responses = [
+            dict(data={"default_branch": "main"}),
+            dict(data={"sha": "c" * 40}),
+            tree,
+            dict(data={"encoding": "base64", "content": blob}),
+            dict(data={"encoding": "base64", "content": blob}),
+        ]
+        with patch("analysis.snapshot.SNAPSHOT_MAX_FILES", 2), patch(
+            "analysis.snapshot.requests.Session",
+            return_value=_fake_github(responses),
+        ):
+            snap = fetch_github_snapshot(
+                _NS(github_url="https://github.com/octo/hello")
+            )
+        self.assertEqual(sorted(snap.files), ["aaa.py", "mmm.py"])
+        self.assertIn("zzz.py (file count limit reached)", snap.skipped)
+
+    def test_skip_reason_returns_the_recorded_exclusion(self):
+        snap = make_snapshot(
+            files={}, skipped=["app.py (file count limit reached)"]
+        )
+        self.assertEqual(snap.skip_reason("app.py"), "file count limit reached")
+        self.assertIsNone(snap.skip_reason("absent.py"))
+
     def test_blob_cache_avoids_repeat_downloads_on_second_fetch(self):
         """A second fetch of the same blobs issues NO new blob HTTP requests.
 
@@ -1986,6 +2055,30 @@ class AgentServiceTests(AgentFixtureMixin, TestCase):
             "analysis.sandbox.run_tests", **sandbox_kw
         ):
             return run_agent(issue or self.issue)
+
+    def test_missing_issue_file_reports_the_recorded_reason(self):
+        """A dropped file must say WHY it was dropped.
+
+        The old generic wording ("only supported source files were fetched")
+        hid the real cause -- file count limit, size limit, sensitivity --
+        and sent people looking in the wrong place.
+        """
+        snap = make_snapshot(
+            files={}, skipped=["app.py (file count limit reached)"]
+        )
+        run = self._run_with(snapshot=snap)
+        self.assertEqual(run.status, RunStatus.FAILED)
+        self.assertEqual(run.verification_status, VerificationStatus.UNVERIFIED)
+        self.assertIsNone(run.tests_ran)
+        self.assertIn("file count limit reached", run.final_summary)
+
+    def test_missing_issue_file_outside_the_tree_keeps_the_generic_wording(self):
+        """A path GitHub simply does not have still gets the generic line."""
+        snap = make_snapshot(files={})
+        run = self._run_with(snapshot=snap)
+        self.assertEqual(run.status, RunStatus.FAILED)
+        self.assertIn("only supported source files were fetched",
+                      run.final_summary)
 
     def test_successful_run_completes_and_persists(self):
         run = self._run_with()

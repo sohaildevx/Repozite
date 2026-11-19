@@ -337,7 +337,7 @@ def _fetch_snapshot(agent_run, issue):
     """
     repo = issue.analysis_run.repository
     try:
-        snapshot = fetch_github_snapshot(repo)
+        snapshot = fetch_github_snapshot(repo, required_path=issue.file_path)
     except (SnapshotError, GitHubError) as exc:
         return None, _safe_summary(str(exc))
     except Exception:
@@ -632,10 +632,18 @@ def run_agent(issue, user=None, agent_run=None):
             agent_run.status = RunStatus.FAILED
             agent_run.verification_status = VerificationStatus.UNVERIFIED
             agent_run.tests_ran = None
-            agent_run.final_summary = (
-                "Issue file is not present in the fetched snapshot "
-                "(only supported source files were fetched)."
-            )
+            
+            reason = snapshot.skip_reason(path)
+            if reason:
+                agent_run.final_summary = (
+                    "Issue file is not present in the fetched snapshot "
+                    f"({reason})."
+                )
+            else:
+                agent_run.final_summary = (
+                    "Issue file is not present in the fetched snapshot "
+                    "(only supported source files were fetched)."
+                )
             agent_run.save()
             logger.warning(
                 "agent run %s: issue file %s not in snapshot",
