@@ -307,8 +307,15 @@ The browser only ever talks to `workers.dev`. The Worker forwards `/api/*` to Re
 * **Start command** (single line — gunicorn runs the analyzer in the background, Django in the foreground):
 
   ```bash
-  gunicorn --chdir analyzer --bind 127.0.0.1:5001 app:app & sleep 3 && cd backend && python manage.py migrate --noinput && exec gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 360
+  gunicorn --chdir analyzer --bind 127.0.0.1:5001 --timeout 120 app:app & sleep 3 && cd backend && python manage.py migrate --noinput && exec gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 360
   ```
+
+  The analyzer's `--timeout 120` matters: without it gunicorn defaults to 30s
+  and kills the worker mid-scan (a mixed JS/TS request runs eslint, tsc and
+  semgrep sequentially), resetting the connection and surfacing as
+  "Analyzer service is unreachable" in Django. Keep the order
+  `tools (≤60s) < ANALYZER_TIMEOUT (90s) < analyzer gunicorn (120s) < Django gunicorn (360s)`
+  so each budget fails before the next-wider one.
 
 * **Health check path:** `/health`
 * Environment must set `DEBUG=False`, `ALLOWED_HOSTS` (Render host **and** the `workers.dev` host), `GITHUB_CALLBACK_URL`, `FRONTEND_URL`, `SESSION_COOKIE_SECURE=True`.
